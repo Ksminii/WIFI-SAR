@@ -11,7 +11,6 @@ SimulationEnvironment
 
 HomingAlgorithm(가장 중요함)
 RSSI 신호 변화에 따라 다음 행동(웨이포인트)을 결정하는 알고리즘으로 구현
-IDLE, ADAPTIVE_ASCENT, ESCAPING 세 가지 상태를 가지는데, 실제 알고리즘에서는 이 부분은 필요없을듯
 
 SimulationVisualizer
  matplotlib을 사용하여 시뮬레이션 과정을 시각화
@@ -47,26 +46,37 @@ class SimParams:
     """
     시뮬레이션 및 알고리즘의 동작을 제어하는 파라미터를 관리
     """
-    # 튜닝된 파라미터: 이 값들은 시뮬레이션 성능에 직접적인 영향을 미침
-    DIST_FAR: float = 18.35                 # 신호가 매우 약할 때의 전진 거리
-    DIST_MID: float = 6.20                  # 신호가 중간일 때의 전진 거리
-    DIST_NEAR: float = 3.15                 # 신호가 강할 때의 전진 거리
-    DIST_PINPOINT: float = 1.25             # 신호가 매우 강할 때의 전진 거리
-    STUCK_THRESHOLD: int = 3                # 'Stuck' 상태로 판단하기까지 신호 개선이 없는 횟수
-    ESCAPE_DISTANCE: float = 25.5           # 'ESCAPING' 상태에서 탈출을 위해 이동하는 거리
-    SIGNAL_MID: float = -66.5               # '중간 신호'로 판단하는 RSSI 임계값
-    SIGNAL_NEAR: float = -59.8              # '강한 신호'로 판단하는 RSSI 임계값
-    SIGNAL_PINPOINT: float = -54.5          # '매우 강한 신호'로 판단하는 RSSI 임계값
-    
-    # 고정 파라미터: 시뮬레이션의 기본 환경을 정의
-    FAILURE_THRESHOLD: float = -90.0        # 이 신호보다 약하면 시작 실패로 간주
-    ASCENT_THRESHOLD: float = -80.0         # 이 신호보다 강해지면 본격적인 탐색(ASCENT) 시작
-    TARGET_THRESHOLD: float = -50.0         # 이 신호보다 강해지면 목표 지점 도착으로 간주
-    DRONE_SPEED: float = 8.0               # 드론의 이동 속도 (m/s)
-    RSSI_SCAN_TIME: float = 2.0             # RSSI 스캔에 소요되는 시간 (s)
-    TIME_LIMIT: float = 300.0               # 시뮬레이션 최대 제한 시간 (s)
-    GPS_ERROR_STD: float = 1.5              # GPS 오차의 표준편차 (m)
-    RSSI_SHADOW_STD: float = 2.0            # RSSI 섀도잉(장주기 페이딩) 오차의 표준편차 (dBm)
+    # --- 이동 거리 (신호 강도별) ---
+    DIST_FAR: float = 15.0      # 신호가 매우 약할 때의 전진 거리 (기존 18.35 → 15.0)
+    DIST_MID: float = 5.0       # 신호가 중간일 때의 전진 거리 (기존 6.20 → 5.5)
+    DIST_NEAR: float = 3.0      # 신호가 강할 때의 전진 거리 (기존 3.15 → 2.5)
+    DIST_PINPOINT: float = 1.2  # 신호가 매우 강할 때의 전진 거리 (기존 1.25 → 1.0)
+
+    STUCK_THRESHOLD: int = 2
+    ESCAPE_DISTANCE: float = 21.0  # 탈출 거리도 약간 줄임 (기존 25.5 → 20.0)
+
+    # --- 신호 임계값 (PATHLOSS_EXPONENT=2.7 기준) ---
+    SIGNAL_MID: float = -75.0      # 중간 신호 (기존 -66.5 → -70.0)
+    SIGNAL_NEAR: float = -67.0     # 강한 신호 (기존 -59.8 → -62.0)
+    SIGNAL_PINPOINT: float = -60.0 # 매우 강한 신호 (기존 -54.5 → -56.0)
+
+    PROBE_DISTANCE: float = 8.0    # 탐사 거리도 약간 줄임 (기존 8.0 → 7.0)
+    GPS_DRIFT_FACTOR: float = 0.8        # 드리프트 계수 - 더 낮게
+    ROTATION_PENALTY_TIME: float = 1.5
+
+    FAILURE_THRESHOLD: float = -90.0
+    ASCENT_THRESHOLD: float = -80.0
+    TARGET_THRESHOLD: float = -60.0  # 성공 기준 완화
+    DRONE_SPEED: float = 8.0
+    RSSI_SCAN_TIME: float = 2.0
+    TIME_LIMIT: float = 300.0
+
+    GPS_ERROR_STD: float = 8.0           # GPS 오차 표준편차 (m) - 더 크게
+    RSSI_SHADOW_STD: float = 2.2
+    SENSOR_DELAY_MEAN: float = 0.12
+    SENSOR_DELAY_STD: float = 0.02
+    SENSOR_ERROR_STD: float = 1.2
+    PATHLOSS_EXPONENT: float = 2.7
 
 @dataclass
 class SimResult:
@@ -115,14 +125,13 @@ class SimulationEnvironment:
         distance = np.linalg.norm(pos - self.hotspot_pos)
         distance = max(distance, Constants.MIN_DISTANCE_TO_HOTSPOT)
         
-        # Log-distance path loss 모델: 신호는 거리에 로그 스케일로 반비례하여 감소
-        signal = -30 - 10 * 2 * np.log10(distance)
+        # [수정] path loss exponent 파라미터 적용
+        n = self.params.PATHLOSS_EXPONENT
+        signal = -30 - 10 * n * np.log10(distance)
 
         if add_noise:
-            # 현실적인 신호 변동성을 위해 두 종류의 노이즈 추가
-            # 노이즈를 더 추가해야할 수도 있음
-            shadow_noise = np.random.normal(0, self.params.RSSI_SHADOW_STD) # 큰 장애물에 의한 신호 감쇠
-            small_noise = np.random.randn() * 0.5                          # 다중 경로 페이딩 등 작은 규모의 신호 변동
+            shadow_noise = np.random.normal(0, self.params.RSSI_SHADOW_STD)
+            small_noise = np.random.randn() * 0.5
             signal += shadow_noise + small_noise
             
         return max(Constants.MIN_SIGNAL_STRENGTH, signal)
@@ -132,118 +141,157 @@ class SimulationEnvironment:
 # --------------------------------------------------------------------------
 class HomingAlgorithm:
     """
-    RSSI 신호를 기반으로 목표물을 찾아가는 알고리즘에 대한 정의
-    이 부분이 가장 중요하며, 수정도 가장 많이 해야할듯
+    RSSI 신호를 기반으로 목표물을 찾아가는 알고리즘 (주변 탐사 로직 적용 버전)
     """
     def __init__(self, start_pos: np.ndarray, params: SimParams):
-        # --- 상태 변수 초기화 (가독성을 위해 여러 줄로 분리) ---
+        # --- 상태 변수 초기화 ---
         self.pos: np.ndarray = np.array(start_pos, dtype=float)
-        self.waypoint: np.ndarray = self.pos.copy()     # 다음 목표 지점
-        self.path: list[np.ndarray] = [start_pos.copy()]# 이동 경로 기록
+        self.waypoint: np.ndarray = self.pos.copy()
+        self.path: list[np.ndarray] = [start_pos.copy()]
         self.params: SimParams = params
         
-        self.is_finished: bool = False                 # 임무 완료 여부
-        self.state: str = "IDLE"                       # 현재 알고리즘 상태
+        self.is_finished: bool = False
+        # ### [수정] 상태에 'PROBING' 추가 ###
+        self.state: str = "ADAPTIVE_ASCENT"  # 초기 상태를 'ADAPTIVE_ASCENT'로 설정                 
         self.last_signal: float = Constants.MIN_SIGNAL_STRENGTH
-        self.stuck_counter: int = 0                    # 신호 개선이 없는 연속 횟수
+        self.stuck_counter: int = 0
         
-        self.best_known_pos: np.ndarray = self.pos.copy() # 가장 신호가 강했던 위치
+        self.best_known_pos: np.ndarray = self.pos.copy()
         self.best_known_signal: float = Constants.MIN_SIGNAL_STRENGTH
-        self.ascent_direction: np.ndarray = np.array([1.0, 0.0]) # 현재 탐색 방향 벡터
+        self.ascent_direction: np.ndarray = np.array([1.0, 0.0])
+
+        # ### [신규] 주변 탐사(Probing)를 위한 변수들 ###
+        self.probe_points: list[np.ndarray] = []    # 탐사할 지점들의 목록
+        self.probe_results: list[dict] = []         # 탐사 후 각 지점의 신호 결과 저장
+        self.probe_index: int = 0                   # 현재 몇 번째 지점을 탐사 중인지
+        self.pre_probe_pos: np.ndarray = self.pos.copy() # 탐사 시작 전 위치
+        self.pre_probe_signal: float = Constants.MIN_SIGNAL_STRENGTH # 탐사 시작 전 신호
 
     def decide_action(self, rssi: float):
-        """현재 RSSI 값을 기반으로 다음 행동을 결정하고 상태를 업데이트함"""
+        """현재 RSSI 값을 기반으로 다음 행동을 결정하고 상태를 업데이트합니다."""
         if self.is_finished:
             return
 
-        # 가장 강한 신호 정보 업데이트
         if rssi > self.best_known_signal:
             self.best_known_signal = rssi
             self.best_known_pos = self.pos.copy()
 
-        # 목표 달성 조건 확인
         if rssi >= self.params.TARGET_THRESHOLD:
             self.state = "FINISHED"
             self.is_finished = True
             return
 
-        # 현재 상태에 따라 적절한 행동 실행 (상태 패턴)
+        # ### [수정] 상태 핸들러에 'PROBING' 추가 ###
         state_handler = {
-            "IDLE": self._execute_idle,
             "ADAPTIVE_ASCENT": self._execute_adaptive_ascent,
+            "PROBING": self._execute_probing,
             "ESCAPING": self._execute_escaping
         }
         handler = state_handler.get(self.state)
         if handler:
             handler(rssi)
         
-        self.last_signal = rssi
+        # PROBING 상태가 아닐 때만 last_signal을 업데이트하여 탐사 전 신호를 기억
+        if self.state != "PROBING":
+            self.last_signal = rssi
 
     def _get_adaptive_distance(self, signal: float) -> float:
-        """신호 강도에 따라 전진할 거리를 동적으로 결정"""
+        """신호 강도에 따라 전진할 거리를 동적으로 결정합니다."""
         if signal > self.params.SIGNAL_PINPOINT: return self.params.DIST_PINPOINT
         if signal > self.params.SIGNAL_NEAR: return self.params.DIST_NEAR
         if signal > self.params.SIGNAL_MID: return self.params.DIST_MID
         return self.params.DIST_FAR
 
-    def _execute_idle(self, rssi: float):
-        """IDLE 상태: 유의미한 신호를 찾을 때까지 대기"""
-        if rssi > self.params.ASCENT_THRESHOLD:
-            # 탐색을 시작할 만큼 강한 신호를 찾으면, 무작위 방향으로 탐색 시작
-            self.state = "ADAPTIVE_ASCENT"
-            angle = np.random.uniform(0, 2 * np.pi)
-            self.ascent_direction = np.array([np.cos(angle), np.sin(angle)])
-            self._execute_adaptive_ascent(rssi)
-        else:
-            # 신호가 너무 약하면 제자리에 머묾
-            self.waypoint = self.pos.copy()
-
     def _execute_adaptive_ascent(self, rssi: float):
-        """ADAPTIVE_ASCENT 상태: 신호가 강해지는 방향으로 전진"""
+        """ADAPTIVE_ASCENT 상태: 신호가 강해지는 방향으로 전진합니다."""
         if rssi > self.last_signal:
-            # 신호가 이전보다 강해졌으면, 같은 방향으로 계속 전진
+            # 신호가 강해졌으면 같은 방향으로 계속 전진
             self.stuck_counter = 0
             step_distance = self._get_adaptive_distance(rssi)
             self.waypoint = self.pos + self.ascent_direction * step_distance
         else:
-            # 신호가 약해졌거나 정체되면, stuck 카운터를 올리고 방향 전환
-            self.stuck_counter += 1
-            if self.stuck_counter > self.params.STUCK_THRESHOLD:
-                # 너무 오래 막혀 있으면 ESCAPING 상태로 전환하여 멀리 벗어남
-                self.state = "ESCAPING"
-                self.waypoint = self.best_known_pos.copy()
-                return
+            # ### [수정] 신호가 약해지면 제자리 회전 대신 '주변 탐사' 시작 ###
+            self.state = "PROBING"
+            self.pre_probe_pos = self.pos.copy()
+            self.pre_probe_signal = self.last_signal # 탐사 전 마지막 신호를 기억
             
-            # 현재 위치에서 대기하며 탐색 방향을 일정 각도 회전
-            self.waypoint = self.pos.copy()
-            rot_matrix = np.array([
-                [np.cos(Constants.ROTATION_ANGLE_RAD), -np.sin(Constants.ROTATION_ANGLE_RAD)],
-                [np.sin(Constants.ROTATION_ANGLE_RAD), np.cos(Constants.ROTATION_ANGLE_RAD)]
+            # 현재 위치 기준 동서남북 4방향으로 탐사 지점 생성
+            offsets = np.array([
+                [0, self.params.PROBE_DISTANCE], [self.params.PROBE_DISTANCE, 0],
+                [0, -self.params.PROBE_DISTANCE], [-self.params.PROBE_DISTANCE, 0]
             ])
-            self.ascent_direction = np.dot(rot_matrix, self.ascent_direction)
+            self.probe_points = [self.pre_probe_pos + offset for offset in offsets]
+            
+            # 탐사 변수 초기화 및 첫 번째 탐사 지점으로 이동 시작
+            self.probe_index = 0
+            self.probe_results = []
+            self.waypoint = self.probe_points[self.probe_index]
+
+    # ### [신규] 주변 탐사를 수행하는 상태 로직 ###
+    def _execute_probing(self, rssi: float):
+        """PROBING 상태: 주변 4개 지점을 방문하며 신호를 측정합니다."""
+        # 방금 도착한 탐사 지점의 결과를 기록
+        self.probe_results.append({'pos': self.pos.copy(), 'rssi': rssi})
+        self.probe_index += 1
+
+        if self.probe_index < len(self.probe_points):
+            # 아직 탐사할 지점이 남았다면 다음 지점으로 이동
+            self.waypoint = self.probe_points[self.probe_index]
+        else:
+            # 4방향 탐사가 모두 끝났으면 결과를 분석
+            best_probe_result = max(self.probe_results, key=lambda x: x['rssi'])
+
+            # 탐사 결과, 기존보다 더 나은 지점을 찾았는지 확인
+            if best_probe_result['rssi'] > self.pre_probe_signal:
+                # 더 나은 방향을 찾았음!
+                self.stuck_counter = 0
+                
+                # 탐사 시작점에서 가장 신호가 좋았던 지점으로의 방향을 새로운 전진 방향으로 설정
+                new_direction_vector = best_probe_result['pos'] - self.pre_probe_pos
+                self.ascent_direction = new_direction_vector / np.linalg.norm(new_direction_vector)
+                
+                # 가장 신호가 좋았던 지점에서부터 새로운 방향으로 전진 시작
+                self.waypoint = best_probe_result['pos'] + self.ascent_direction * self._get_adaptive_distance(best_probe_result['rssi'])
+                self.state = "ADAPTIVE_ASCENT"
+            else:
+                # 주변을 다 둘러봐도 더 나은 곳이 없음. 'Stuck'으로 판단.
+                self.stuck_counter += 1
+                if self.stuck_counter > self.params.STUCK_THRESHOLD:
+                    # 너무 많이 막혔으므로 ESCAPING 상태로 전환
+                    self.state = "ESCAPING"
+                    self.waypoint = self.best_known_pos.copy()
+                else:
+                    # 아직 기회가 남았으므로 탐사 시작 지점으로 복귀 후 다시 시도
+                    self.waypoint = self.pre_probe_pos
+                    self.state = "ADAPTIVE_ASCENT"
 
     def _execute_escaping(self, rssi: float):
-        """ESCAPING : local maximum에서 벗어나기 위해 무작위 방향으로 멀리 이동"""
-        angle = np.random.uniform(0, 2 * np.pi)
-        self.ascent_direction = np.array([np.cos(angle), np.sin(angle)])
-        self.waypoint = self.best_known_pos + self.ascent_direction * self.params.ESCAPE_DISTANCE
-        
-        # 탈출 후 다시 탐색 시작
+        """ESCAPING 상태: 국소 최댓값에서 벗어나기 위해 여러 번 무작위 방향으로 멀리 이동합니다."""
+        escape_steps = 3  # 탈출 시 반복 횟수 (원하는 만큼 조정 가능)
+        escape_distance = self.params.ESCAPE_DISTANCE
+        pos = self.pos.copy()
+        for _ in range(escape_steps):
+            angle = np.random.uniform(0, 2 * np.pi)
+            direction = np.array([np.cos(angle), np.sin(angle)])
+            pos += direction * escape_distance
+        self.ascent_direction = direction
+        self.waypoint = pos
         self.state = "ADAPTIVE_ASCENT"
         self.stuck_counter = 0
         self.last_signal = Constants.MIN_SIGNAL_STRENGTH
 
     def update_position(self, new_pos: np.ndarray):
-        """알고리즘의 현재 위치를 갱신하고 경로에 추가"""
+        """알고리즘의 현재 위치를 갱신하고 경로에 추가합니다."""
         self.pos = new_pos
         self.path.append(new_pos.copy())
 
     def get_total_distance(self) -> float:
-        """지금까지 이동한 총 거리를 계산"""
+        """지금까지 이동한 총 거리를 계산합니다."""
         if len(self.path) < 2:
             return 0.0
         path_arr = np.array(self.path)
         return np.sum(np.linalg.norm(np.diff(path_arr, axis=0), axis=1))
+
 
 # --------------------------------------------------------------------------
 # 4. 시각화 클래스 (관심사 분리)
@@ -254,32 +302,24 @@ class SimulationVisualizer:
     시뮬레이션 로직과 분리되어 코드의 복잡도를 낮춤
     """
     def __init__(self):
-        plt.ion()  # 대화형 모드 활성화
+        plt.ion()
         self.fig, self.ax = plt.subplots(figsize=(10, 10))
-
-    def update(self, env: SimulationEnvironment, algo: HomingAlgorithm, true_pos: np.ndarray,
-               reported_pos: np.ndarray, simulation_time: float, current_rssi: float):
-        """매 시뮬레이션 스텝마다 차트를 업데이트"""
-        self.ax.clear()
-        path_arr = np.array(algo.path)
         
-        self.ax.plot(path_arr[:, 0], path_arr[:, 1], 'o-', color='lightcoral', ms=2, label='Reported Path (GPS)')
-        self.ax.plot(true_pos[0], true_pos[1], 'go', markersize=10, label='True Position')
-        self.ax.plot(reported_pos[0], reported_pos[1], 'o', color='gold', ms=10, mfc='none', mew=2, label='Reported Position (GPS)')
+    def update(self, env: SimulationEnvironment, algo: HomingAlgorithm, 
+               reported_pos: np.ndarray, simulation_time: float, current_rssi: float):
+        self.ax.clear()
+        reported_path_arr = np.array(algo.path)
+        self.ax.plot(reported_path_arr[:, 0], reported_path_arr[:, 1], 'o--', color='lightcoral', ms=2, label='Drone Path)')
+        self.ax.plot(reported_pos[0], reported_pos[1], 'o', color='gold', ms=10, mfc='none', mew=2, label='pos')
         self.ax.plot(env.hotspot_pos[0], env.hotspot_pos[1], 'rX', markersize=12, label='Hotspot (Goal)')
         self.ax.plot(algo.waypoint[0], algo.waypoint[1], 'bo', markersize=8, mfc='none', label='Next Waypoint')
-        
+
         self.ax.set_title(f"Time: {simulation_time:.1f}s | State: {algo.state} | RSSI: {current_rssi:.1f} dBm")
         self.ax.set_xlabel("X (meters)")
         self.ax.set_ylabel("Y (meters)")
-        self.ax.grid(True)
+        self.ax.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.7)
         self.ax.legend(loc='upper right')
         self.ax.axis('equal')
-        
-        view_range = max(100, np.max(np.abs(path_arr)) + 20) if len(algo.path) > 0 else 100
-        self.ax.set_xlim(-view_range, view_range)
-        self.ax.set_ylim(-view_range, view_range)
-        
         plt.pause(0.1)
 
     def close(self):
@@ -298,50 +338,74 @@ class SimulationRunner:
     """
     def __init__(self, params: SimParams):
         self.params = params
-
+    
     def run_single(self, visualizer: SimulationVisualizer = None) -> SimResult:
-        """단일 시뮬레이션을 실행하고 그 결과를 반환."""
+        """단일 시뮬레이션을 실행하고 그 결과를 반환합니다. (오차 누적 모델 최종 수정 버전)"""
         env = SimulationEnvironment(self.params)
         algo = HomingAlgorithm(start_pos=np.array([0.0, 0.0]), params=self.params)
+        
+        # --- 초기화 ---
         true_pos = np.array([0.0, 0.0])
+        previous_gps_error = np.zeros(2)
+        previous_direction = None
 
-        initial_signal = env.get_signal(true_pos, add_noise=False)
-        if initial_signal < self.params.FAILURE_THRESHOLD:
-            return SimResult(False, np.linalg.norm(true_pos - env.hotspot_pos), 0, 0, "Initial signal too weak")
-
-        if visualizer:
-            print(f"Hotspot is at: {env.hotspot_pos.round(1)}")
-
+        # --- 시뮬레이션 루프 ---
         simulation_time = 0.0
         while simulation_time < self.params.TIME_LIMIT:
-            # 1. 시간 경과 및 RSSI 스캔
-            simulation_time += self.params.RSSI_SCAN_TIME
-            current_rssi = env.get_signal(true_pos)
-            
-            # 2. GPS 오차를 포함한 위치 업데이트
-            gps_error = np.random.normal(0, self.params.GPS_ERROR_STD, 2)
+            # 1. 인식(Perceive): 현재 실제 위치에 GPS 오차를 더해, 드론이 인식하는 자신의 위치를 계산합니다.
+            new_random_error = np.random.normal(0, self.params.GPS_ERROR_STD, 2)
+            drift_factor = self.params.GPS_DRIFT_FACTOR
+            gps_error = drift_factor * previous_gps_error + (1 - drift_factor) * new_random_error
+            previous_gps_error = gps_error
+
             reported_pos = true_pos + gps_error
             algo.update_position(reported_pos)
-            
-            # 3. 알고리즘 실행
-            algo.decide_action(current_rssi)
-            if algo.is_finished:
-                break
 
-            # 4. 다음 웨이포인트로 이동
-            distance_to_travel = np.linalg.norm(algo.waypoint - true_pos)
-            time_to_travel = distance_to_travel / self.params.DRONE_SPEED
-            simulation_time += time_to_travel
-            true_pos = algo.waypoint.copy()
+            # 2. 판단(Decide): 현재 신호를 측정하고, 인식된 위치를 기반으로 다음 목표(waypoint)를 결정합니다.
+            # 센서 지연 및 오차 적용
+            sensor_delay = max(0.0, np.random.normal(self.params.SENSOR_DELAY_MEAN, self.params.SENSOR_DELAY_STD))
+            sensor_error = np.random.normal(0, self.params.SENSOR_ERROR_STD)
+            current_rssi = env.get_signal(true_pos) + sensor_error
+            simulation_time += sensor_delay
+
+            algo.decide_action(current_rssi)
+
+            # --- 현실적 이동 방식 적용 ---
+            # 드론은 reported_pos에서 웨이포인트까지 이동한다고 인식함
+            move_vector = algo.waypoint - reported_pos
+            move_distance = np.linalg.norm(move_vector)
+            move_direction = move_vector / move_distance if move_distance > 0 else None
+
+            rotation_penalty = 0.0
+            if previous_direction is not None and move_distance > 0:
+                angle_change = np.arccos(np.clip(np.dot(previous_direction, move_direction), -1.0, 1.0))
+                if angle_change > np.deg2rad(10):
+                    rotation_penalty = self.params.ROTATION_PENALTY_TIME
+            previous_direction = move_direction
+
+            # 실제 위치를 reported_pos에서 웨이포인트까지 이동시키는 것처럼 업데이트
+            true_pos += move_vector
+            time_to_travel = move_distance / self.params.DRONE_SPEED
+            simulation_time += time_to_travel + self.params.RSSI_SCAN_TIME + rotation_penalty
 
             if visualizer:
-                visualizer.update(env, algo, true_pos, reported_pos, simulation_time, current_rssi)
+                visualizer.update(env, algo, reported_pos, simulation_time, current_rssi)
+
+            # --- 성공 판정 후 웨이포인트까지 이동 ---
+            if algo.is_finished:
+                break
         
+        # --- 결과 정리 ---
         reason = "Success" if algo.is_finished else "Timeout"
-        
+        final_distance = np.linalg.norm(true_pos - env.hotspot_pos)
+        waypoint_distance = np.linalg.norm(true_pos - algo.waypoint)
+        print(f"\n[종료] 실제 위치와 핫스팟 거리: {final_distance:.2f} m")
+        print(f"[종료] 실제 위치와 웨이포인트 거리: {waypoint_distance:.2f} m")
+        print(f"[종료] GPS 오차: {previous_gps_error}")
+
         return SimResult(
             success=algo.is_finished,
-            final_distance=np.linalg.norm(true_pos - env.hotspot_pos),
+            final_distance=final_distance,
             total_travel=algo.get_total_distance(),
             search_time=simulation_time,
             reason=reason
