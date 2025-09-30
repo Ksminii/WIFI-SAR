@@ -47,40 +47,40 @@ class SimParams:
     시뮬레이션 및 알고리즘의 동작을 제어하는 파라미터를 관리
     """
     # --- 이동 거리 (신호 강도별) ---
-    DIST_FAR: float = 15.0      # 신호가 매우 약할 때의 전진 거리 (기존 18.35 → 15.0)
-    DIST_MID: float = 5.0       # 신호가 중간일 때의 전진 거리 (기존 6.20 → 5.5)
-    DIST_NEAR: float = 3.0      # 신호가 강할 때의 전진 거리 (기존 3.15 → 2.5)
-    DIST_PINPOINT: float = 1.2  # 신호가 매우 강할 때의 전진 거리 (기존 1.25 → 1.0)
+    DIST_FAR: float = 15.0      # 신호가 매우 약할 때의 전진 거리 
+    DIST_MID: float = 5.0       # 신호가 중간일 때의 전진 거리
+    DIST_NEAR: float = 3.0      # 신호가 강할 때의 전진 거리
+    DIST_PINPOINT: float = 1.2  # 신호가 매우 강할 때의 전진 거리
 
-    STUCK_THRESHOLD: int = 2
-    ESCAPE_DISTANCE: float = 21.0  # 탈출 거리도 약간 줄임 (기존 25.5 → 20.0)
+    STUCK_THRESHOLD: int = 2 # 'Stuck' 상태로 판단하기까지 신호 개선이 없는 횟수
+    ESCAPE_DISTANCE: float = 21.0  # 'ESCAPING' 상태에서 탈출을 위해 이동하는 거리
 
     # --- 신호 임계값 (PATHLOSS_EXPONENT=2.7 기준) ---
-    SIGNAL_MID: float = -75.0      # 중간 신호 (기존 -66.5 → -70.0)
-    SIGNAL_NEAR: float = -67.0     # 강한 신호 (기존 -59.8 → -62.0)
-    SIGNAL_PINPOINT: float = -60.0 # 매우 강한 신호 (기존 -54.5 → -56.0)
+    SIGNAL_MID: float = -75.0      # 중간 신호 
+    SIGNAL_NEAR: float = -67.0     # 강한 신호 
+    SIGNAL_PINPOINT: float = -60.0 # 매우 강한 신호
 
-    PROBE_DISTANCE: float = 8.0    # 탐사 거리도 약간 줄임 (기존 8.0 → 7.0)
-    GPS_DRIFT_FACTOR: float = 0.8        # 드리프트 계수 - 더 낮게
-    ROTATION_PENALTY_TIME: float = 1.5
+    PROBE_DISTANCE: float = 8.0    # PROBE 시 탐사거리
+    GPS_DRIFT_FACTOR: float = 0.8  # GPS DRIFT 계수
+    ROTATION_PENALTY_TIME: float = 1.5 # 회전할 때 감속 시간 고려
 
-    FAILURE_THRESHOLD: float = -90.0
-    ASCENT_THRESHOLD: float = -80.0
+    FAILURE_THRESHOLD: float = -90.0 # 이 신호보다 약하면 시작 실패로 간주인데 여기엔 상관 x
+    ASCENT_THRESHOLD: float = -80.0 # 탐색 시작점이기는 한데 현재 알고리즘에선 무의미
     TARGET_THRESHOLD: float = -60.0  # 성공 기준 완화
-    DRONE_SPEED: float = 8.0
-    RSSI_SCAN_TIME: float = 2.0
-    TIME_LIMIT: float = 300.0
+    DRONE_SPEED: float = 8.0 # 드론의 이동 속도 (m/s)
+    RSSI_SCAN_TIME: float = 2.0  # RSSI 스캔에 소요되는 시간 (s)
+    TIME_LIMIT: float = 300.0  # 시뮬레이션 최대 제한 시간 (s) 
 
-    GPS_ERROR_STD: float = 8.0           # GPS 오차 표준편차 (m) - 더 크게
-    RSSI_SHADOW_STD: float = 2.2
-    SENSOR_DELAY_MEAN: float = 0.12
-    SENSOR_DELAY_STD: float = 0.02
-    SENSOR_ERROR_STD: float = 1.2
-    PATHLOSS_EXPONENT: float = 2.7
+    GPS_ERROR_STD: float = 8.0    # GPS 오차의 표준편차 (m)
+    RSSI_SHADOW_STD: float = 2.2 # RSSI 섀도잉(장주기 페이딩) 오차의 표준편차 (dBm)
+    SENSOR_DELAY_MEAN: float = 0.12 # SENSOR
+    SENSOR_DELAY_STD: float = 0.02 # SENSOR
+    SENSOR_ERROR_STD: float = 1.2 # SENSOR
+    PATHLOSS_EXPONENT: float = 2.7 # log-distance에서 n 값
 
 @dataclass
 class SimResult:
-    """단일 시뮬레이션의 결과를 저장하는 구조체 역할을 합니다."""
+    """단일 시뮬레이션의 결과를 저장하는 구조체 역할"""
     success: bool
     final_distance: float
     total_travel: float
@@ -361,7 +361,7 @@ class SimulationRunner:
             reported_pos = true_pos + gps_error
             algo.update_position(reported_pos)
 
-            # 2. 판단(Decide): 현재 신호를 측정하고, 인식된 위치를 기반으로 다음 목표(waypoint)를 결정합니다.
+            # 현재 신호를 측정하고, 인식된 위치를 기반으로 다음 목표(waypoint)를 결정.
             # 센서 지연 및 오차 적용
             sensor_delay = max(0.0, np.random.normal(self.params.SENSOR_DELAY_MEAN, self.params.SENSOR_DELAY_STD))
             sensor_error = np.random.normal(0, self.params.SENSOR_ERROR_STD)
@@ -370,7 +370,6 @@ class SimulationRunner:
 
             algo.decide_action(current_rssi)
 
-            # --- 현실적 이동 방식 적용 ---
             # 드론은 reported_pos에서 웨이포인트까지 이동한다고 인식함
             move_vector = algo.waypoint - reported_pos
             move_distance = np.linalg.norm(move_vector)
