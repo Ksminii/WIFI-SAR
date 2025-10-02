@@ -154,7 +154,6 @@ class SimulationEnvironment:
 class HomingAlgorithm:
 
     def __init__(self, start_pos: np.ndarray, params: SimParams):
-        # --- 공통 변수 초기화 ---
         self.pos, self.waypoint = np.array(start_pos, dtype=float), np.array(start_pos, dtype=float)
         self.path, self.params, self.is_finished = [start_pos.copy()], params, False
         self.state = "SPIRAL"
@@ -163,16 +162,13 @@ class HomingAlgorithm:
         self.ascent_direction = np.array([1.0, 0.0])
         self.waypoint_count: int = 0
 
-        # --- 나선형 탐색용 변수 ---
         self.spiral_waypoint = self.pos.copy()
         self.spiral_leg_length, self.spiral_steps_taken, self.spiral_legs_completed = 1, 0, 0
         self.spiral_direction = np.array([1.0, 0.0])
 
-        # --- 샘플링 탈출용 변수 ---
         self.escape_points, self.escape_results = [], {}
         self.current_escape_point_index, self.stuck_signal_baseline = 0, Constants.MIN_SIGNAL_STRENGTH
 
-        # --- [수정] 신호 필터링(EWMA)을 위한 변수 추가 ---
         self.smoothed_rssi = Constants.MIN_SIGNAL_STRENGTH
 
     def decide_action(self, rssi: float):
