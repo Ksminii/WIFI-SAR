@@ -169,6 +169,7 @@ class HomingAlgorithm:
         self.escape_points, self.escape_results = [], {}
         self.current_escape_point_index, self.stuck_signal_baseline = 0, Constants.MIN_SIGNAL_STRENGTH
 
+        #지수이동평균
         self.smoothed_rssi = Constants.MIN_SIGNAL_STRENGTH
 
     def decide_action(self, rssi: float):
