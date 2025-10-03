@@ -21,10 +21,8 @@ class SimParams:
     DIST_MID: float = 5.0
     DIST_NEAR: float = 3.0
     DIST_PINPOINT: float = 1.2
-
     STUCK_THRESHOLD: int = 3
     ESCAPE_DISTANCE: float = 25.0
-
     SIGNAL_MID: float = -51.0
     SIGNAL_NEAR: float = -45.0
     SIGNAL_PINPOINT: float = -35.0
@@ -44,14 +42,9 @@ class SimParams:
     NUM_ESCAPE_SAMPLES: int = 8
     ESCAPE_SAMPLE_RADIUS: float = 20.0
 
-    ### 지수이동평균_평활상수 ###
-    """(0~1 사이 값) 신호 필터링 강도. 높을수록 현재 값에 민감, 낮을수록 둔감."""
-    RSSI_SMOOTHING_FACTOR: float = 0.4
-    #########################
-
     # --- 페이딩 모델 파라미터 ---
-    ENABLE_FADING: bool = False  
-    RICIAN_K_FACTOR: float = 0  # 라이시안 K 팩터 (dB)
+    ENABLE_FADING: bool = True  
+    RICIAN_K_FACTOR: float = 10.0  # 라이시안 K 팩터 (dB)
                                     # K > 10: LOS (페이딩 거의 없음)
                                     # K = 3~10 dB: LOS + 산란 혼합
                                     # K ≈ 0 dB: 레이리 페이딩 (NLOS)
@@ -69,7 +62,50 @@ class SimResult:
     rssi_at_success: float
 
 # --------------------------------------------------------------------------
-# 2. Simulation Environment Class
+# 2. 임계값 계산 함수 
+# --------------------------------------------------------------------------
+def calculate_dynamic_threshold(params: SimParams,
+                                target_distance: float = 10.0,
+                                num_samples: int = 1000,
+                                percentile: float = 99.7) -> float:
+    """
+    모든 노이즈 요소(Rician Fading, Shadowing, Small-scale, Sensor Error)를
+    고려하여 신뢰구간 기반 임계값 산출
+
+    Args:
+        params: 시뮬레이션 파라미터
+        target_distance: 목표 거리 (기본 10m)
+        num_samples: 샘플링 횟수 (많을수록 정확하지만 느림)
+        percentile: 신뢰구간 백분위수 (99.7% = 3-시그마)
+
+    Returns:
+        성공 판정 임계값 (dBm)
+    """
+    # 테스트환경  
+    test_env = SimulationEnvironment(params)
+    test_env.hotspot_pos = np.array([target_distance, 0.0])
+
+    measurements = []
+    drone_pos = np.array([0.0, 0.0])
+
+ 
+    for _ in range(num_samples):
+        # 1. 환경 신호 측정 
+        signal = test_env.get_signal(drone_pos, add_noise=True)
+
+        # 2. 센서 오차 추가
+        sensor_error = np.random.normal(0, params.SENSOR_ERROR_STD)
+        # 3. 최종 측정값 = 환경 신호 + 센서 오차
+        measured_rssi = signal + sensor_error
+        measurements.append(measured_rssi)
+
+    # 임계값 계산 
+    threshold = np.percentile(measurements, percentile)
+
+    return threshold
+
+# --------------------------------------------------------------------------
+# 3. Simulation Environment Class
 # --------------------------------------------------------------------------
 class SimulationEnvironment:
     def __init__(self, params: SimParams):
@@ -285,6 +321,9 @@ class HomingAlgorithm:
 
     def get_total_distance(self) -> float:
         return np.sum(np.linalg.norm(np.diff(np.array(self.path), axis=0), axis=1)) if len(self.path) > 1 else 0.0
+
+
+
 # --------------------------------------------------------------------------
 # 4. 시각화 클래스
 # --------------------------------------------------------------------------
@@ -333,23 +372,15 @@ class SimulationRunner:
 
         # --- 성공 시점의 RSSI를 기록하기 위한 변수 ---
         rssi_at_success: float = 0.0
-        
-        # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-        # --- [추가] 3-시그마 기반의 동적 성공 임계값 계산 
-        # 1. 10m 지점의 이론적 RSSI 계산할 것, 핫스팟 기준이라 TX 파워를 15로 가정했음
-        # 공식: 15.0 - (30 + 20 * log10(10)) = -35.0
-        theoretical_rssi_at_10m = -35.0
-        
-        # 2. 현재 시뮬레이션의 RSSI_SHADOW_STD 값을 가져온다 (1, 3, 5 중 하나)
-        current_std = self.params.RSSI_SHADOW_STD
-        
-        # 3. 2-시그마 값을 더해 최종 성공 임계값(상한선)을 계산
-        success_threshold_dbm = theoretical_rssi_at_10m + (3 * current_std)
 
-        # 시각화 모드일 때 계산된 임계값 출력 (확인용)
-        if visualizer:
-            print(f"\nSimulation with RSSI_SHADOW_STD = {current_std:.1f}")
-            print(f"Success Threshold set to: {success_threshold_dbm:.2f} dBm")
+        # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+        # --- [수정] 몬테카를로 방식으로 동적 임계값 계산 ---
+        success_threshold_dbm = calculate_dynamic_threshold(
+            params=self.params,
+            target_distance=10.0,
+            num_samples=1000,
+            percentile=99.7
+        )
         # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
         simulation_time = 0.0
