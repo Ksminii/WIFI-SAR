@@ -256,11 +256,18 @@ class HomingAlgorithm:
         self.escape_points, self.escape_results = [], {}
         self.current_escape_point_index = 0
         num_samples, radius = self.params.NUM_ESCAPE_SAMPLES, self.params.ESCAPE_SAMPLE_RADIUS
+
+        mean_angle = np.arctan2(self.ascent_direction[1], self.ascent_direction[0])
+
+        angle_std_dev = np.pi / 4 
+
         for _ in range(num_samples):
-            angle = np.random.uniform(0, 2 * np.pi)
+            angle = np.random.normal(loc=mean_angle, scale=angle_std_dev)
+            
             r = np.random.uniform(0, radius)
             point = self.best_known_pos + np.array([r * np.cos(angle), r * np.sin(angle)])
             self.escape_points.append(point)
+        
         self.waypoint = self.escape_points[0]
 
     def _execute_escaping(self, rssi: float):
