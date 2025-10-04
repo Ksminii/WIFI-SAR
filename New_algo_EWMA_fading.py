@@ -55,14 +55,14 @@ class SimParams:
     ########################
 
     # --- 페이딩 모델 파라미터 ---
-    ENABLE_FADING: bool = False  
-    RICIAN_K_FACTOR: float = 3.0  # 라이시안 K 팩터 (dB)
+    ENABLE_FADING: bool = True
+    RICIAN_K_FACTOR: float = 0.0  # 라이시안 K 팩터 (dB)
                                     # K > 10: LOS (페이딩 거의 없음)
                                     # K = 3~10 dB: LOS + 산란 혼합
-                                    # K ≈ 0 dB: 레이리 페이딩 (NLOS)
+                                    # K ≈ 0.01 dB: 레이리 페이딩 (NLOS)
 
 @dataclass
-class SimResult:
+class SimResult:    
     """단일 시뮬레이션의 결과를 저장하는 구조체 역할"""
     success: bool
     final_distance: float
@@ -351,6 +351,16 @@ class SimulationRunner:
         # --- 성공 시점의 RSSI를 기록하기 위한 변수 ---
         rssi_at_success: float = 0.0
         
+        """
+        섀도잉 표준편차 (Sigma)	라이시안 (K=6) 종료 기준	레일리 (K=0.01) 종료 기준
+                                        1.0	-27.6 dBm	-25.4 dBm
+                                        3.0	-21.6 dBm	-19.4 dBm
+                                        5.0	-15.6 dBm	-13.4 dBm
+                                        cdf(99%) = 0.99 = 0.5 * (1 + erf((x - μ) / (σ * sqrt(2))))
+        3-시그마 = μ + 3σ
+        1% 상위 = +4.4dB (K=6), +6.6dB (K=0.01)
+        """
+        
         # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
         # --- [추가] 3-시그마 기반의 동적 성공 임계값 계산 
         # 1. 10m 지점의 이론적 RSSI 계산할 것, 핫스팟 기준이라 TX 파워를 15로 가정했음
@@ -360,8 +370,14 @@ class SimulationRunner:
         # 2. 현재 시뮬레이션의 RSSI_SHADOW_STD 값을 가져온다 (1, 3, 5 중 하나)
         current_std = self.params.RSSI_SHADOW_STD
         
-        # 3. 2-시그마 값을 더해 최종 성공 임계값(상한선)을 계산
-        success_threshold_dbm = theoretical_rssi_at_10m + (3 * current_std)
+        if self.params.RICIAN_K_FACTOR < 1.0: # K-factor가 1 미만이면 레일리로 간주
+            positive_fading_margin = 6.6  # 레일리 페이딩의 상위 1% 마진 (+6.6dB)
+        else:
+            # K=6 기준 라이시안 페이딩 마진
+            positive_fading_margin = 4.4  # 라이시안(K=6) 페이딩의 상위 1% 마진 (+4.4dB)
+        
+        # 3. 3-시그마 값을 더해 최종 성공 임계값(상한선)을 계산
+        success_threshold_dbm = theoretical_rssi_at_10m + (3 * current_std) + positive_fading_margin
 
         # 시각화 모드일 때 계산된 임계값 출력 (확인용)
         if visualizer:
@@ -533,3 +549,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
