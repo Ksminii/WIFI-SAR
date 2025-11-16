@@ -518,7 +518,7 @@ class SimulationRunner:
             # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
             # 이동 벡터 계산 (알고리즘이 인식하는 reported_pos 기준)
-            move_vector = algo.waypoint - reported_pos
+            move_vector = algo.waypoint - true_pos
             move_distance = np.linalg.norm(move_vector)
 
             # 🔍 첫 10개 루프 - 이동 벡터 상세 정보
