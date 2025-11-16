@@ -32,17 +32,6 @@
  * - SEARCH_DISTANCE: 탐색 거리 (기본 10m)
  * - MOVE_MULTIPLIER: 이동 배수 (기본 2.0)
  * - MAX_ROUNDS: 최대 탐색 라운드 (기본 5회)
- *
- * [수정 내역]
- * 1. (P1) tshark가 실제 TARGET_SSID를 스캔하도록 수정
- * 2. (P2) MAVSDK Offboard 지속 전송 (2Hz 이상)
- * 3. (P3) 5지점 탐색 (효율적 6회 이동)
- * 4. (P4) EKF 준비 대기 로직 추가
- * 5. MAVSDK 3.11.0 API 호환
- *
- * [참고]
- * - Python 버전: simple.py
- * - CLAUDE.md 파일 참조
  * ========================================
  */
 
