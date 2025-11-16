@@ -24,15 +24,10 @@
  *
  * [사용법]
  *   ./simple_move serial:///dev/ttyAMA0:57600  (실제 드론)
- *   ./simple_move udp://:14540                 (SITL 테스트)
  *
  * [설정 변수]
  * - MOVE_DISTANCE: 각 방향 이동 거리 (기본 10m)
  * - MAX_ROUNDS: 최대 이동 라운드 (기본 3회)
- *
- * [참고]
- * - Python 버전: simple_move.py
- * - 실제 탐색은 simple.cpp 또는 simple_search.cpp 사용
  * ========================================
  */
 
