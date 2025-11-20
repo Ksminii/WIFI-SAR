@@ -291,7 +291,13 @@ def search_five_directions(vehicle, target_ssid, iface, search_distance=5):
 
     # [수정 P4] EKF(로컬 좌표)가 준비될 때까지 안전 대기
     print("로컬 좌표계(EKF) 준비 대기 중...")
+    ekf_timeout = 30  # 30초
+    ekf_start_time = time.time()
     while vehicle.location.local_frame.north is None:
+        if time.time() - ekf_start_time > ekf_timeout:
+            print("[경고] EKF 초기화 타임아웃! 긴급 착륙")
+            vehicle.mode = VehicleMode("LAND")
+            raise Exception("EKF 초기화 타임아웃")
         time.sleep(1)
         print("... EKF 대기 ...")
     
@@ -428,7 +434,12 @@ def land(vehicle):
     print("\n=== 착륙 시작 ===")
     vehicle.mode = VehicleMode("LAND")
 
+    land_timeout = 60  # 60초
+    land_start_time = time.time()
     while vehicle.armed:
+        if time.time() - land_start_time > land_timeout:
+            print("[경고] 착륙 타임아웃! (드론이 여전히 armed 상태)")
+            break
         alt = vehicle.location.global_relative_frame.alt
         if alt is not None:
             print(f"착륙 중... 고도: {alt:.1f}m")
@@ -452,7 +463,7 @@ def main():
 
         print("=" * 60)
         print("드론이 이륙한 상태인지 확인하세요!")
-        print("수동으로 이륙 후 'GUIDE' 모드로 변경하고")
+        print("수동으로 이륙 후 'GUIDED' 모드로 변경하고")
         print("Enter를 눌러 탐색을 시작하세요.")
         print(f"목표 SSID: '{TARGET_SSID}'")
         print("=" * 60)
