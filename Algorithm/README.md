@@ -1,4 +1,4 @@
-# Algorithm - WiFi-SAR 탐색 알고리즘
+# Algorithm 
 
 WiFi 신호(Hotspot) 기반 드론 탐색 알고리즘 구현
 
