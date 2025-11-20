@@ -1,4 +1,4 @@
-# Simulator - WiFi-SAR 시뮬레이션 환경
+# Simulator 
 
 ## 디렉토리 구조
 
