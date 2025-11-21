@@ -33,6 +33,9 @@ Kalman Filter 기반 최적 상태 추정 알고리즘
 - Rician Fading 모델 (K-factor 조정 가능)
 - 노이즈가 많은 환경에서 가장 우수한 성능
 
+### algrithm_ver1.py                 
+- 논문 작성 알고리즘
+
 ### algorithm_ver2_simple.py
 - 드론 비행 후 수정 버전
 - 보다 더 간단한 방식
