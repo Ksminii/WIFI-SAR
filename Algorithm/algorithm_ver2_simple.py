@@ -9,7 +9,8 @@ warnings.filterwarnings('ignore')  # 모든 경고 차단
 
 
 # ==========================================================================
-# 상하좌우 탐색
+# algo_ver2_simple
+# 상하좌우 탐색 ver
 # ==========================================================================
 
 
@@ -48,19 +49,25 @@ class SimParams:
     DIST_FAR: float = 15.0
     DIST_MID: float = 5.0
     DIST_NEAR: float = 3.0
-    DIST_PINPOINT: float = 0.8
+    DIST_PINPOINT: float = 0.8  # [최적화] 1.2 → 0.8m
 
     STUCK_THRESHOLD: int = 3
     ESCAPE_DISTANCE: float = 25.0
-    ASCENT_THRESHOLD: float = -60.0
-    PROBE_DISTANCE: float = 20.0  # (사용 안 함, 위 SCAN_RADIUS로 대체됨)
 
-    GPS_DRIFT_FACTOR: float = 0.8
+    SIGNAL_MID: float = -51.0
+    SIGNAL_NEAR: float = -45.0
+    SIGNAL_PINPOINT: float = -35.0
+    ASCENT_THRESHOLD: float = -60.0
+
+    PROBE_DISTANCE: float = 8.0
+
+    GPS_DRIFT_FACTOR: float = 0.8  # (0~1) GPS 오차의 표류 강도. 0이면 매번 독립적인 오차(표류 없음), 1에 가까울수록 오차가 천천히 변함.
+
     ROTATION_PENALTY_TIME: float = 1.5
-    DRONE_SPEED: float = 15.0  # 속도 상향
-    RSSI_SCAN_TIME: float = 0.5
+    DRONE_SPEED: float = 8.0
+    RSSI_SCAN_TIME: float = 2.0
     TIME_LIMIT: float = 100000.0
-    GPS_ERROR_STD: float = 3.0
+    GPS_ERROR_STD: float = 3.0  # [최적화] 8.0 → 3.0m (드론용 RTK GPS)
     RSSI_SHADOW_STD: float = 1.0
     SENSOR_DELAY_MEAN: float = 0.12
     SENSOR_DELAY_STD: float = 0.02
@@ -68,12 +75,22 @@ class SimParams:
     NUM_ESCAPE_SAMPLES: int = 8
     ESCAPE_SAMPLE_RADIUS: float = 20.0
 
-    MOMENTUM_FACTOR: float = 0.1
-    MAX_MOMENTUM_BOOST: float = 2.5
-    RSSI_SMOOTHING_FACTOR: float = 0.3
+    ### 관성(Momentum) 파라미터 ###
+    MOMENTUM_FACTOR: float = 0.1  # 성공 스트리크 당 이동 속도 증가량
+    MAX_MOMENTUM_BOOST: float = 2.5  # 최대 가속 배율
+    ##############################
 
+    ### 지수이동평균_평활상수 ###
+    """(0~1 사이 값) 신호 필터링 강도. 높을수록 현재 값에 민감, 낮을수록 둔감."""
+    RSSI_SMOOTHING_FACTOR: float = 0.3
+    ########################
+
+    # --- 페이딩 모델 파라미터 ---
     ENABLE_FADING: bool = True
-    RICIAN_K_FACTOR: float = 6.0
+    RICIAN_K_FACTOR: float = 6.0  # 라이시안 K 팩터 (dB)
+    # K > 10: LOS (페이딩 거의 없음)
+    # K = 3~10 dB: LOS + 산란 혼합
+    # K ≈ 0.01 dB: 레이리 페이딩 (NLOS)
 
 
 @dataclass
@@ -87,7 +104,7 @@ class SimResult:
     waypoint_count: int
     waypoints_at_threshold: int
     rssi_at_success: float
-    true_total_travel: float
+    true_total_travel: float  # [추가] True Pos 기반 실제 이동 거리
 
 
 # --------------------------------------------------------------------------
@@ -95,6 +112,8 @@ class SimResult:
 # --------------------------------------------------------------------------
 class SimulationEnvironment:
     def __init__(self, params: SimParams):
+        if not isinstance(params, SimParams):
+            raise TypeError("params는 SimParams의 인스턴스여야 합니다.")
         self.params = params
         angle = np.random.uniform(0, 2 * np.pi)
         self.hotspot_pos = np.array([
@@ -103,26 +122,69 @@ class SimulationEnvironment:
         ])
 
     def apply_rician_fading(self, signal_db: float) -> float:
-        if not self.params.ENABLE_FADING: return signal_db
+        """
+        라이시안 페이딩을 신호에 적용
+
+        라이시안 페이딩 모델:
+        수신 신호 진폭 r은 다음 확률 밀도 함수를 따름:
+
+        f(r) = (r/σ²) * exp(-(r² + s²)/(2σ²)) * I₀(rs/σ²)
+
+        K-factor 조절로 다양한 환경 표현:
+        - K > 10 dB: 순수 LOS (페이딩 거의 없음)
+        - K = 3~10 dB: LOS + 산란 혼합 환경
+        - K → 0 dB: 레이리 페이딩 (순수 NLOS)
+        """
+        if not self.params.ENABLE_FADING:
+            return signal_db
+
+        # dB를 선형 스케일로 변환
         signal_linear = 10 ** (signal_db / 10)
+
+        # K-factor를 선형 스케일로 변환
         K_linear = 10 ** (self.params.RICIAN_K_FACTOR / 10)
+
+        # LOS 성분
         los_component = np.sqrt(K_linear / (K_linear + 1))
+
+        # 산란 성분의 표준편차
         scatter_scale = 1 / np.sqrt(2 * (K_linear + 1))
-        scatter_real = np.random.normal(0, scatter_scale)
-        scatter_imag = np.random.normal(0, scatter_scale)
+
+        # 산란 성분 생성
+        scatter_real = np.random.normal(0, scatter_scale)  # N₁
+        scatter_imag = np.random.normal(0, scatter_scale)  # N₂
+
+        # 복소 진폭의 크기
         amplitude = np.abs(los_component + scatter_real + 1j * scatter_imag)
+
+        # 수신 전력 = 진폭²
         faded_signal_linear = signal_linear * (amplitude ** 2)
-        return 10 * np.log10(faded_signal_linear) if faded_signal_linear > 0 else Constants.MIN_SIGNAL_STRENGTH
+
+        # 선형 스케일을 다시 dB로 변환
+        if faded_signal_linear > 0:
+            return 10 * np.log10(faded_signal_linear)
+        else:
+            return Constants.MIN_SIGNAL_STRENGTH
 
     def get_signal(self, pos: np.ndarray, add_noise: bool = True) -> float:
+        if not isinstance(pos, np.ndarray) or pos.shape != (2,):
+            raise ValueError("위치는 2D numpy 배열이어야 합니다.")
+
         distance = np.linalg.norm(pos - self.hotspot_pos)
         distance = max(distance, Constants.MIN_DISTANCE_TO_HOTSPOT)
+        p_tx = self.params.TRANSMIT_POWER_DBM
         path_loss_db = 30.0 + 20 * np.log10(distance)
-        signal = self.params.TRANSMIT_POWER_DBM - path_loss_db
+        signal = p_tx - path_loss_db
+
+        # 라이시안 페이딩 적용
         signal = self.apply_rician_fading(signal)
+
         if add_noise:
-            signal += np.random.normal(0, self.params.RSSI_SHADOW_STD)
-            signal += np.random.randn() * 0.5
+            shadow_fading = np.random.normal(0, self.params.RSSI_SHADOW_STD)
+            signal += shadow_fading
+            small_scale_fading = np.random.randn() * 0.5
+            signal += small_scale_fading
+
         return max(Constants.MIN_SIGNAL_STRENGTH, signal)
 
 
@@ -261,64 +323,84 @@ class HomingAlgorithm:
 # --------------------------------------------------------------------------
 class SimulationVisualizer:
     def __init__(self, time_scale: float = 1.0, view_radius_m: float = 50.0):
+        """
+        time_scale: 시뮬레이션 속도 조절 (1.0 = 실시간, 0.5 = 절반 속도, 2.0 = 2배 속도, 5.0 = 5배 속도)
+        """
         plt.ion()
         self.fig, self.ax = plt.subplots(figsize=(10, 10))
         self.start_real_time = None
         self.start_simulation_time = None
         self.time_scale = time_scale
         self.view_radius = view_radius_m
-        self.path_history = []
+        print(f"Visualizer initialized with time_scale = {self.time_scale}")  # 디버그용
+        self.path_history = []  # 경로 히스토리 누적
+        self.last_real_time = None
+        self.last_sim_time = None
 
-    def update(self, env, true_pos, reported_pos, simulation_time, current_rssi, status="Moving",
-               algo_state: str = "INIT", next_waypoint: np.ndarray = None):
+    def update(self, env: SimulationEnvironment, true_pos: np.ndarray, reported_pos: np.ndarray, simulation_time: float,
+               current_rssi: float, status: str = "Moving", algo_state: str = "INIT", next_waypoint: np.ndarray = None):
+        # 첫 업데이트일 때 시작 시간 초기화
         if self.start_real_time is None:
             self.start_real_time = time.time()
             self.start_simulation_time = simulation_time
 
-        sim_elapsed = simulation_time - self.start_simulation_time
-        real_elapsed = time.time() - self.start_real_time
-        target_real = sim_elapsed / self.time_scale
-        if target_real > real_elapsed:
-            time.sleep(target_real - real_elapsed)
+        # 배속 적용: 시뮬레이션 시작 이후 경과 시간 기반으로 계산
+        sim_elapsed_total = simulation_time - self.start_simulation_time
+        target_real_elapsed_total = sim_elapsed_total / self.time_scale  # ← 배속 적용
 
+        # 현재까지 실제로 경과한 시간
+        current_real_time = time.time()
+        actual_real_elapsed_total = current_real_time - self.start_real_time
+
+        # 필요한 만큼 대기 (전체 기준으로 동기화)
+        sleep_time = target_real_elapsed_total - actual_real_elapsed_total
+        if sleep_time > 0.001:  # 1ms 이상만 sleep
+            time.sleep(sleep_time)
+
+        # 경로 히스토리에 현재 위치 추가
         if len(self.path_history) == 0 or np.linalg.norm(true_pos - np.array(self.path_history[-1])) > 0.1:
             self.path_history.append(true_pos.copy())
 
+        # 그래프 업데이트 (간단하고 빠르게)
         self.ax.clear()
-        if len(self.path_history) > 1:
-            path = np.array(self.path_history)
-            self.ax.plot(path[:, 0], path[:, 1], 'c-', alpha=0.6, linewidth=1, label='Path')
 
-        self.ax.plot(true_pos[0], true_pos[1], 'bo', markersize=14, label='Drone', zorder=5)
+        # 누적된 경로 표시
+        if len(self.path_history) > 1:
+            path_array = np.array(self.path_history)
+            self.ax.plot(path_array[:, 0], path_array[:, 1], 'c-', alpha=0.6, linewidth=1, label='Path')
+
+        # 드론 현재 위치 (실제 위치)
+        self.ax.plot(true_pos[0], true_pos[1], 'bo', markersize=14, label='Drone (True Pos)', zorder=5)
+
+        # 드론 인식 위치 (GPS 오차 포함) 표시
         if reported_pos is not None:
-            self.ax.plot(reported_pos[0], reported_pos[1], 'bx', markersize=10, alpha=0.7, label='GPS Reading',
+            self.ax.plot(reported_pos[0], reported_pos[1], 'bx', markersize=10, alpha=0.7, label='Drone (Reported GPS)',
                          zorder=4)
 
-        self.ax.plot(env.hotspot_pos[0], env.hotspot_pos[1], 'r*', markersize=20, label='Hotspot', zorder=4)
-
+        # Next Waypoint 표시
         if next_waypoint is not None:
             self.ax.plot(next_waypoint[0], next_waypoint[1], 'go', markersize=10, mfc='none', mew=2,
                          label='Next Waypoint', zorder=3)
             self.ax.plot([true_pos[0], next_waypoint[0]], [true_pos[1], next_waypoint[1]], 'y--', alpha=0.7,
                          linewidth=1.5)
 
-        dist = np.linalg.norm(true_pos - env.hotspot_pos)
+        # 목표 (hotspot)
+        self.ax.plot(env.hotspot_pos[0], env.hotspot_pos[1], 'r*', markersize=20, label='Hotspot (Goal)', zorder=4)
 
-        display_state = algo_state
-        if algo_state == "OUTBOUND":
-            display_state = "SCAN (GO)"
-        elif algo_state == "INBOUND":
-            display_state = "SCAN (BACK)"
-        elif algo_state == "MOVING_CENTER":
-            display_state = "MOVING >>"
+        # 드론에서 목표까지 선 그리기
+        self.ax.plot([true_pos[0], env.hotspot_pos[0]], [true_pos[1], env.hotspot_pos[1]], 'g--', alpha=0.3,
+                     linewidth=1)
 
-        title_line_1 = f"[{display_state}] Time: {simulation_time:.1f}s"
-        title_line_2 = f"Dist: {dist:.1f}m | RSSI: {current_rssi:.1f} dBm"
+        distance_to_goal = np.linalg.norm(true_pos - env.hotspot_pos)
+        speed_display = f"x{self.time_scale:.1f}" if self.time_scale != 1.0 else "1x"
 
-        self.ax.set_title(title_line_1 + " | " + title_line_2)
-        self.ax.set_xlabel("X (m)");
-        self.ax.set_ylabel("Y (m)")
-        self.ax.grid(True, linestyle='--', alpha=0.3)
+        title_line_1 = f"[{algo_state} | {status}]"
+        title_line_2 = f"Time: {simulation_time:.1f}s | Dist: {distance_to_goal:.1f}m | RSSI: {current_rssi:.1f} dBm | Speed: {speed_display}"
+
+        self.ax.set_title(title_line_1 + "\n" + title_line_2)
+        self.ax.set_xlabel("X (meters)")
+        self.ax.set_ylabel("Y (meters)")
+        self.ax.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.3)
         self.ax.legend(loc='upper right')
 
         if status == "SUCCESS" and len(self.path_history) > 0:
@@ -332,10 +414,11 @@ class SimulationVisualizer:
             self.ax.set_xlim(true_pos[0] - self.view_radius, true_pos[0] + self.view_radius)
             self.ax.set_ylim(true_pos[1] - self.view_radius, true_pos[1] + self.view_radius)
 
-        plt.pause(0.00001)
+        # 최소한의 pause - 화면 업데이트만 하고 지연 최소화
+        plt.pause(0.00001)  # 거의 무시할 수 있는 수준
 
     def close(self):
-        plt.ioff();
+        plt.ioff()
         plt.show()
 
 
@@ -353,110 +436,192 @@ class SimulationRunner:
         true_pos = np.array([0.0, 0.0])
         reported_pos = true_pos.copy()
         previous_gps_error, previous_direction = np.zeros(2), None
-        waypoints_at_threshold_pass, threshold_passed = 0, False  # 복구됨
+        waypoints_at_threshold_pass, threshold_passed = 0, False
 
+        # --- 성공 시점의 RSSI 기록 ---
         rssi_at_success: float = 0.0
 
+        # --- 99.5% percentile 기반 동적 성공 임계값 계산
+        # Monte Carlo 검증된 임계값 사용 (10,000 samples)
         current_std = self.params.RSSI_SHADOW_STD
-        if self.params.RICIAN_K_FACTOR == 0.0:
-            threshold_map = {1.0: -26.7, 3.0: -24.0, 5.0: -20.2}
-        else:
-            threshold_map = {1.0: -28.8, 3.0: -25.7, 5.0: -21.2}
-        if current_std in threshold_map:
-            success_threshold = threshold_map[current_std]
-        else:
-            success_threshold = -28.0 if current_std <= 1.0 else -21.0
 
+        # 99.5% percentile 임계값 매핑 (Monte Carlo 재계산 결과)
+        if self.params.RICIAN_K_FACTOR == 0.0:  # Rayleigh fading (K=0)
+            threshold_map = {
+                1.0: -26.7,
+                3.0: -24.0,
+                5.0: -20.2
+            }
+        else:  # Rician fading (K=6)
+            threshold_map = {
+                1.0: -28.8,
+                3.0: -25.7,
+                5.0: -21.2
+            }
+
+        # 정확한 매핑이 있으면 사용, 없으면 보간
+        if current_std in threshold_map:
+            success_threshold_dbm = threshold_map[current_std]
+        else:
+            # 선형 보간
+            keys = sorted(threshold_map.keys())
+            if current_std < keys[0]:
+                success_threshold_dbm = threshold_map[keys[0]]
+            elif current_std > keys[-1]:
+                success_threshold_dbm = threshold_map[keys[-1]]
+            else:
+                for i in range(len(keys) - 1):
+                    if keys[i] <= current_std <= keys[i + 1]:
+                        # 선형 보간
+                        ratio = (current_std - keys[i]) / (keys[i + 1] - keys[i])
+                        success_threshold_dbm = (threshold_map[keys[i]] +
+                                                 ratio * (threshold_map[keys[i + 1]] - threshold_map[keys[i]]))
+                        break
+
+        # 시각화 모드일 때 계산된 임계값 출력 (확인용)
         if visualizer:
             print(f"\nSimulation with RSSI_SHADOW_STD = {current_std:.1f}")
-            print(f"Success Threshold: {success_threshold:.2f} dBm")
+            # Rician/Rayleigh 상태 표시 추가
+            k_type = "Rayleigh (K=0)" if self.params.RICIAN_K_FACTOR == 0.0 else f"Rician (K={self.params.RICIAN_K_FACTOR})"
+            print(f"Fading Model: {k_type}")
+            print(f"Success Threshold set to: {success_threshold_dbm:.2f} dBm")
 
         simulation_time = 0.0
         loop_count = 0
 
         while simulation_time < self.params.TIME_LIMIT:
             loop_count += 1
+            new_random_error = np.random.normal(0, self.params.GPS_ERROR_STD, 2)
+            drift_factor = self.params.GPS_DRIFT_FACTOR
+            gps_error = drift_factor * previous_gps_error + (1 - drift_factor) * new_random_error
+            previous_gps_error = gps_error
 
-            new_err = np.random.normal(0, self.params.GPS_ERROR_STD, 2)
-            gps_err = self.params.GPS_DRIFT_FACTOR * previous_gps_error + (1 - self.params.GPS_DRIFT_FACTOR) * new_err
-            previous_gps_error = gps_err
-            reported_pos = true_pos + gps_err
-
+            reported_pos = true_pos + gps_error
             algo.update_position(reported_pos)
 
-            rssi = env.get_signal(true_pos)
-            simulation_time += max(0.0, np.random.normal(self.params.SENSOR_DELAY_MEAN, self.params.SENSOR_DELAY_STD))
+            sensor_delay = max(0.0, np.random.normal(self.params.SENSOR_DELAY_MEAN, self.params.SENSOR_DELAY_STD))
+            sensor_error = np.random.normal(0, self.params.SENSOR_ERROR_STD)
+            current_rssi = env.get_signal(true_pos) + sensor_error
+            simulation_time += sensor_delay
 
-            algo.decide_action(rssi)
+            algo.decide_action(current_rssi)
+            # 알고리즘의 현재 상태를 기반으로 시각화에 표시할 상세 상태 문자열 생성
+            current_algo_state_str = algo.state
+            current_algo_state_str = algo.state
 
-            if visualizer and loop_count <= 5:
-                print(f"[Loop {loop_count}] State: {algo.state} | RSSI: {rssi:.2f} | WP: {algo.waypoint}")
+            if algo.state == "FINISHED_SUCCESS":
+                current_algo_state_str = "SUCCESS"
 
+            #  알고리즘 상태 디버그 정보
+            if visualizer and loop_count <= 10:  # 'visualizer'일 때만 출력하도록 조건 추가
+                print(
+                    f"[Loop {loop_count}] State: {current_algo_state_str} | RSSI: {current_rssi:.2f} dBm (Smoothed: {algo.smoothed_rssi:.2f}) | Waypoint: ({algo.waypoint[0]:.1f}, {algo.waypoint[1]:.1f})")
+
+            # waypoint 계산 중 상태 표시
             if visualizer:
-                visualizer.update(env, true_pos, reported_pos, simulation_time, rssi, "Active", algo.state,
-                                  algo.waypoint)
+                # [수정] reported_pos를 visualizer에 전달
+                visualizer.update(env, true_pos, reported_pos, simulation_time, current_rssi,
+                                  status="Computing Waypoint",
+                                  algo_state=current_algo_state_str, next_waypoint=algo.waypoint)
 
-            if not algo.is_finished and rssi >= success_threshold:
+            if not algo.is_finished and algo.smoothed_rssi >= success_threshold_dbm:
                 algo.is_finished = True
-                rssi_at_success = rssi
-                algo.state = "SUCCESS"
+                algo.state = "FINISHED_SUCCESS"
+                # 성공 시점의 RSSI 값 체크 (평활화된 값 기준)
+                rssi_at_success = algo.smoothed_rssi
 
-            move_vec = algo.waypoint - reported_pos
-            dist = np.linalg.norm(move_vec)
+            # 이동 벡터 계산 (알고리즘이 인식하는 reported_pos 기준)
+            move_vector = algo.waypoint - reported_pos
+            move_distance = np.linalg.norm(move_vector)
 
-            if dist > 0:
-                direction = move_vec / dist
-                penalty = 0.0
-                if previous_direction is not None and np.dot(previous_direction, direction) < 0.9:
-                    penalty = self.params.ROTATION_PENALTY_TIME
-                previous_direction = direction
+            if visualizer and loop_count <= 10:
+                print(
+                    f"[Loop {loop_count}] reported_pos: ({reported_pos[0]:.1f}, {reported_pos[1]:.1f}) | waypoint: ({algo.waypoint[0]:.1f}, {algo.waypoint[1]:.1f}) | move_vector: ({move_vector[0]:.1f}, {move_vector[1]:.1f})")
 
-                travel_time = dist / self.params.DRONE_SPEED
-                num_steps = max(1, int(travel_time / 0.05))
-                step_vec = move_vec / num_steps
-                step_time = travel_time / num_steps
+            move_direction = move_vector / move_distance if move_distance > 0 else None
 
-                for _ in range(num_steps):
-                    true_pos += step_vec
-                    algo.update_true_position(true_pos)
+            rotation_penalty = 0.0
+            if previous_direction is not None and move_distance > 0:
+                angle_change = np.arccos(np.clip(np.dot(previous_direction, move_direction), -1.0, 1.0))
+                if angle_change > np.deg2rad(10):
+                    rotation_penalty = self.params.ROTATION_PENALTY_TIME
+            previous_direction = move_direction
 
-                    new_err = np.random.normal(0, self.params.GPS_ERROR_STD, 2)
-                    gps_err = self.params.GPS_DRIFT_FACTOR * previous_gps_error + (
-                                1 - self.params.GPS_DRIFT_FACTOR) * new_err
-                    previous_gps_error = gps_err
-                    reported_pos = true_pos + gps_err
+            time_to_travel = move_distance / self.params.DRONE_SPEED
+            num_steps = max(1, int(time_to_travel / 0.05))  # 50ms마다 업데이트
+            step_size = move_distance / num_steps
 
-                    algo.update_position(reported_pos)
-                    simulation_time += step_time
+            for step in range(num_steps):
+                if move_distance > 0:
+                    true_pos += (move_vector / move_distance) * step_size
+                else:
+                    true_pos += move_vector
 
+                algo.update_true_position(true_pos)
+
+                new_random_error = np.random.normal(0, self.params.GPS_ERROR_STD, 2)
+                drift_factor = self.params.GPS_DRIFT_FACTOR
+                gps_error = drift_factor * previous_gps_error + (1 - drift_factor) * new_random_error
+                previous_gps_error = gps_error
+                reported_pos = true_pos + gps_error
+
+                simulation_time += time_to_travel / num_steps
+
+                if visualizer:
+                    visualizer.update(env, true_pos, reported_pos, simulation_time, current_rssi, status="Moving",
+                                      algo_state=current_algo_state_str, next_waypoint=algo.waypoint)
+
+                if algo.is_finished:
+                    break
+
+            # RSSI_SCAN_TIME과 rotation_penalty를 프레임으로 나누어 표시
+            pause_time = self.params.RSSI_SCAN_TIME + rotation_penalty
+            if pause_time > 0:
+                num_pause_frames = max(1, int(pause_time / 0.05))
+                frame_time = pause_time / num_pause_frames
+                for _ in range(num_pause_frames):
+                    simulation_time += frame_time
                     if visualizer:
-                        visualizer.update(env, true_pos, reported_pos, simulation_time, rssi, "Moving", algo.state,
-                                          algo.waypoint)
+                        visualizer.update(env, true_pos, reported_pos, simulation_time, current_rssi,
+                                          status="Scanning RSSI",
+                                          algo_state=current_algo_state_str, next_waypoint=algo.waypoint)
 
-                    if algo.is_finished: break
+            if algo.is_finished:
+                break
 
-                simulation_time += penalty
-
-            if algo.is_finished: break
-
+        # 탐색 완료 시 최종 화면 표시
         if visualizer and algo.is_finished:
-            visualizer.update(env, true_pos, reported_pos, simulation_time, rssi, "SUCCESS", "FINISHED", None)
-            time.sleep(2)
+            visualizer.update(env, true_pos, reported_pos, simulation_time, current_rssi, status="SUCCESS",
+                              algo_state=current_algo_state_str, next_waypoint=algo.waypoint)
+            import time as time_module
+            time_module.sleep(2)  # 2초간 최종 화면 표시
+
+        reason = "Success" if algo.is_finished else "Timeout"
+        final_distance = np.linalg.norm(true_pos - env.hotspot_pos)
 
         return SimResult(
-            algo.is_finished, np.linalg.norm(true_pos - env.hotspot_pos),
-            algo.get_total_distance(), simulation_time, "Success" if algo.is_finished else "Timeout",
-            algo.waypoint_count, waypoints_at_threshold_pass, rssi_at_success, algo.get_true_total_distance()
+            success=algo.is_finished,
+            final_distance=final_distance,
+            total_travel=algo.get_total_distance(),
+            true_total_travel=algo.get_true_total_distance(),
+            search_time=simulation_time,
+            reason=reason,
+            waypoint_count=algo.waypoint_count,
+            waypoints_at_threshold=waypoints_at_threshold_pass,
+            rssi_at_success=rssi_at_success
         )
 
     def run_multiple(self, num_simulations: int = 1000):
         print(f"Starting {num_simulations} simulations...")
         results = []
         start_time = time.time()
+
         for i in range(num_simulations):
             if (i + 1) % 10 == 0:
-                if (i + 1) % 100 == 0: print(f"\rProgress: {i + 1}/{num_simulations}", end="")
+                if (i + 1) % 100 == 0:
+                    print(f"\rProgress: {i + 1}/{num_simulations}", end="")
             results.append(self.run_single())
+
         end_time = time.time()
         print(f"\nTotal execution time: {end_time - start_time:.2f} seconds")
         self._analyze_results(results)
@@ -464,34 +629,45 @@ class SimulationRunner:
     def _analyze_results(self, results: list[SimResult]):
         successful_runs = [r for r in results if r.success]
         success_count = len(successful_runs)
-        print(f"\n--- Final Statistical Analysis ---")
-        print(f"Success Rate: {success_count / len(results) * 100:.1f}%")
+        num_simulations = len(results)
+
+        print("\n--- Final Statistical Analysis ---")
+        print(f"Success Rate: {success_count / num_simulations * 100:.1f}%")
 
         if successful_runs:
-            success_waypoints = [r.waypoint_count for r in successful_runs]
-            success_rssi = [r.rssi_at_success for r in successful_runs if r.rssi_at_success != 0.0]
+            # 데이터 추출
+            success_waypoint_counts = [r.waypoint_count for r in successful_runs]
+            success_rssi_values = [r.rssi_at_success for r in successful_runs if r.rssi_at_success != 0.0]  # 0.0은 초기값
             total_travels = [r.total_travel for r in successful_runs]
             true_total_travels = [r.true_total_travel for r in successful_runs]
             search_times = [r.search_time for r in successful_runs]
 
+            # 통계 출력
             print(f"\n--- Stats on Successful Runs ({len(successful_runs)} runs) ---")
-            print(f"Avg Waypoints Generated: {np.mean(success_waypoints):.1f} (Std: {np.std(success_waypoints):.1f})")
-            if success_rssi:
-                print(
-                    f"Avg RSSI at Success Moment: {np.mean(success_rssi):.2f} dBm (Std: {np.std(success_rssi):.2f} dBm)")
-            print(f"Avg Total Distance Traveled: {np.mean(total_travels):.2f} m (Std: {np.std(total_travels):.2f} m)")
             print(
-                f"Avg Total Distance Traveled (True Pos): {np.mean(true_total_travels):.2f} m (Std: {np.std(true_total_travels):.2f} m)")
+                f"Avg Waypoints Generated: {np.mean(success_waypoint_counts):.1f} (Std: {np.std(success_waypoint_counts):.1f})")
+            if success_rssi_values:
+                print(
+                    f"Avg RSSI at Success Moment: {np.mean(success_rssi_values):.2f} dBm (Std: {np.std(success_rssi_values):.2f} dBm)")
+            else:
+                print("Avg RSSI at Success Moment: N/A (No successful runs recorded RSSI)")
+            print(f"Avg Total Distance Traveled: {np.mean(total_travels):.2f} m (Std: {np.std(total_travels):.2f} m)")
+            print(f"Avg Total Distance Traveled (True Pos): {np.mean(true_total_travels):.2f} m (Std: {np.std(true_total_travels):.2f} m)")
             print(f"Avg Search Time: {np.mean(search_times):.2f} s (Std: {np.std(search_times):.2f} s)")
 
         failure_reasons = {}
         for r in results:
-            if not r.success: failure_reasons[r.reason] = failure_reasons.get(r.reason, 0) + 1
+            if not r.success:
+                failure_reasons[r.reason] = failure_reasons.get(r.reason, 0) + 1
+
         print("\n--- Failure Analysis ---")
         if not failure_reasons:
             print("No failures recorded.")
         else:
-            for r, c in failure_reasons.items(): print(f"- {r}: {c} times ({c / len(results) * 100:.1f}%)")
+            total_failures = num_simulations - success_count
+            if total_failures > 0:
+                for reason, count in failure_reasons.items():
+                    print(f"- {reason}: {count} times ({count / total_failures * 100:.1f}%)")
 
 
 # --------------------------------------------------------------------------
@@ -507,6 +683,8 @@ def main():
 
     if mode == '1':
         print("\nStarting single simulation...")
+
+        # 배속 선택
         print("\n배속을 선택하세요:")
         print(" [1] 0.5배속 (느림)")
         print(" [2] 1.0배속 (실시간)")
@@ -516,14 +694,18 @@ def main():
         speed_map = {'1': 0.5, '2': 1.0, '3': 100.0}  # 100배 = 최대한 빠르게
         time_scale = speed_map.get(speed_choice, 1.0)
 
+        speed_names = {'0.5': '0.5배속', '1.0': '1.0배속', '100.0': '최대속'}
+        print(f"{speed_names.get(str(time_scale), '1.0배속')}로 시작합니다...")
+
         params = SimParams()
         runner = SimulationRunner(params)
-        visualizer = SimulationVisualizer(time_scale=time_scale, view_radius_m=100.0)
+        visualizer = SimulationVisualizer(time_scale=time_scale, view_radius_m=120.0)
         result = runner.run_single(visualizer=visualizer)
         visualizer.close()
 
         print("\n--- Simulation Result ---")
         print(f"Success: {result.success} (Reason: {result.reason})")
+
         if result.success:
             print("\n--- On Success ---")
             print(f"Waypoints Generated: {result.waypoint_count}")
@@ -535,11 +717,8 @@ def main():
         print(f"Final Distance to Hotspot: {result.final_distance:.2f} m")
         print(f"Total Search Time: {result.search_time:.2f} s")
 
-
     elif mode == '2':
-
         shadow_std_values = [1.0, 3.0, 5.0]
-
         for std_val in shadow_std_values:
             print("\n" + "=" * 50)
             print(f"### Starting Simulation for RSSI_SHADOW_STD = {std_val:.1f} ###")
