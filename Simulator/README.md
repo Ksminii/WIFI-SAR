@@ -34,5 +34,6 @@ python simulator_fading_v2.1.py
 ```
 
 ### final
+- 시각화 업그레이드
 - GPS_ERROR_STD: 8.0m → 3.0m (드론용 RTK GPS 정확도)
 - DIST_PINPOINT: 1.2m → 0.8m (목표 근접 거리 감소)
