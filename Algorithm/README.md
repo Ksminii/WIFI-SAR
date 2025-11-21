@@ -8,7 +8,8 @@ WiFi 신호(Hotspot) 기반 드론 탐색 알고리즘 구현
 Algorithm/
 ├── algorithm_ewma_v1.1.py           # EWMA 기반 알고리즘
 ├── algorithm_ewma_fading_v1.2.py    # EWMA + Momentum 알고리즘
-└── algorithm_kalman_v1.0.py         # Kalman Filter 알고리즘
+├── algorithm_kalman_v1.0.py         # Kalman Filter 알고리즘
+└── algrithm_ver1.py                 # 논문 작성 알고리즘
 ```
 
 ## 알고리즘 설명
