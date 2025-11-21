@@ -18,13 +18,16 @@ WIFI-SAR/
 │   ├── README.md                           시뮬레이터 상세 가이드
 │   ├── simulator_base_v2.0.py             기본 시뮬레이터
 │   ├── simulator_fading_v2.1.py           페이딩 모델 시뮬레이터
-│   └── tempsim1.py                        실험용
+│   ├── tempsim1.py                        실험용
+│   └── final_simulator.py                 최종 시뮬레이터
 │
 ├── Algorithm/                              # 알고리즘 구현
 │   ├── README.md                           알고리즘 상세 설명
 │   ├── algorithm_kalman_v1.0.py           Kalman Filter
 │   ├── algorithm_ewma_v1.1.py             EWMA 평활화
-│   └── algorithm_ewma_fading_v1.2.py      EWMA + Fading (최신)
+│   ├── algorithm_ewma_v1.1.py             EWMA 평활화
+│   ├── algorithm_ver1.py                  논문 작성 알고리즘
+│   └── algorithm_ver2_simple.py           상하좌우 이동
 │
 └── Drone/                                  # 하드웨어 구현
     ├── README.md                           하드웨어 설정 가이드
