@@ -9,7 +9,8 @@ Algorithm/
 ├── algorithm_ewma_v1.1.py           # EWMA 기반 알고리즘
 ├── algorithm_ewma_fading_v1.2.py    # EWMA + Momentum 알고리즘
 ├── algorithm_kalman_v1.0.py         # Kalman Filter 알고리즘
-└── algrithm_ver1.py                 # 논문 작성 알고리즘
+├── algrithm_ver1.py                 # 논문 작성 알고리즘
+└── algrithm_ver2_simple.py          # 상하좌우 탐색 알고리즘
 ```
 
 ## 알고리즘 설명
@@ -31,6 +32,13 @@ Kalman Filter 기반 최적 상태 추정 알고리즘
 - RSSI 예측-보정 사이클로 노이즈 감소
 - Rician Fading 모델 (K-factor 조정 가능)
 - 노이즈가 많은 환경에서 가장 우수한 성능
+
+### algorithm_ver2_simple.py
+- 드론 비행 후 수정 버전
+- 보다 더 간단한 방식
+- 상하좌우 탐색 후 신호 강한 방향으로 이동
+- 상하좌우 탐색 반복
+- 보폭-이동거리 동적 변경
 
 ## 실행 방법
 
