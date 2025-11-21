@@ -461,7 +461,6 @@ class SimulationRunner:
         print(f"\nTotal execution time: {end_time - start_time:.2f} seconds")
         self._analyze_results(results)
 
-    # ✅ [복구 완료] 원하시던 상세 통계 출력 (Mean + Std)
     def _analyze_results(self, results: list[SimResult]):
         successful_runs = [r for r in results if r.success]
         success_count = len(successful_runs)
