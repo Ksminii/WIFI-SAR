@@ -6,7 +6,9 @@
 Simulator/
 ├── simulator_base_v2.0.py          # 기본 시뮬레이터
 ├── simulator_fading_v2.1.py        # 페이딩 모델 추가
-└── tempsim1.py                     # 개발용
+├── tempsim1.py                     # 개발
+└── final_simulator.py              # 최종 시뮬레이터
+
 ```
 
 ## 버전별 변경사항
@@ -30,3 +32,7 @@ v2.0 대비 추가:
 ```bash
 python simulator_fading_v2.1.py
 ```
+
+### final
+- GPS_ERROR_STD: 8.0m → 3.0m (드론용 RTK GPS 정확도)
+- DIST_PINPOINT: 1.2m → 0.8m (목표 근접 거리 감소)
