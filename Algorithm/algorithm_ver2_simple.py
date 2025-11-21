@@ -22,8 +22,6 @@ class Constants:
     INITIAL_DISTANCE: float = 100.0
     MIN_SIGNAL_STRENGTH: float = -100.0
     MIN_DISTANCE_TO_HOTSPOT: float = 1.0
-    ROTATION_ANGLE_RAD: float = np.pi / 4
-
 
 @dataclass
 class SimParams:
@@ -39,30 +37,15 @@ class SimParams:
     SCAN_RADIUS_FAR: float = 20.0  # 멀 때는 20m씩 왕복
     SCAN_RADIUS_MID: float = 10.0  # 중간엔 10m씩 왕복
     SCAN_RADIUS_NEAR: float = 5.0  # 가까우면 5m씩 왕복
-    # ------------------------
 
     # 신호 강도 기준점
     SIGNAL_MID: float = -50.0
     SIGNAL_NEAR: float = -40.0
     SIGNAL_PINPOINT: float = -35.0
+    # ------------------------
 
-    DIST_FAR: float = 15.0
-    DIST_MID: float = 5.0
-    DIST_NEAR: float = 3.0
-    DIST_PINPOINT: float = 0.8  # [최적화] 1.2 → 0.8m
-
-    STUCK_THRESHOLD: int = 3
-    ESCAPE_DISTANCE: float = 25.0
-
-    SIGNAL_MID: float = -51.0
-    SIGNAL_NEAR: float = -45.0
-    SIGNAL_PINPOINT: float = -35.0
-    ASCENT_THRESHOLD: float = -60.0
-
-    PROBE_DISTANCE: float = 8.0
-
+    # --- 시뮬레이터 ---
     GPS_DRIFT_FACTOR: float = 0.8  # (0~1) GPS 오차의 표류 강도. 0이면 매번 독립적인 오차(표류 없음), 1에 가까울수록 오차가 천천히 변함.
-
     ROTATION_PENALTY_TIME: float = 1.5
     DRONE_SPEED: float = 8.0
     RSSI_SCAN_TIME: float = 2.0
@@ -72,18 +55,8 @@ class SimParams:
     SENSOR_DELAY_MEAN: float = 0.12
     SENSOR_DELAY_STD: float = 0.02
     SENSOR_ERROR_STD: float = 1.2
-    NUM_ESCAPE_SAMPLES: int = 8
-    ESCAPE_SAMPLE_RADIUS: float = 20.0
+    # ------------------------
 
-    ### 관성(Momentum) 파라미터 ###
-    MOMENTUM_FACTOR: float = 0.1  # 성공 스트리크 당 이동 속도 증가량
-    MAX_MOMENTUM_BOOST: float = 2.5  # 최대 가속 배율
-    ##############################
-
-    ### 지수이동평균_평활상수 ###
-    """(0~1 사이 값) 신호 필터링 강도. 높을수록 현재 값에 민감, 낮을수록 둔감."""
-    RSSI_SMOOTHING_FACTOR: float = 0.3
-    ########################
 
     # --- 페이딩 모델 파라미터 ---
     ENABLE_FADING: bool = True
@@ -91,6 +64,7 @@ class SimParams:
     # K > 10: LOS (페이딩 거의 없음)
     # K = 3~10 dB: LOS + 산란 혼합
     # K ≈ 0.01 dB: 레이리 페이딩 (NLOS)
+    # ------------------------
 
 
 @dataclass
@@ -219,12 +193,7 @@ class HomingAlgorithm:
         self.smoothed_rssi = Constants.MIN_SIGNAL_STRENGTH
         self.true_path = [start_pos.copy()]
         self.current_true_pos = start_pos.copy()
-        self.last_signal = Constants.MIN_SIGNAL_STRENGTH
-        self.stuck_counter = 0
-        self.best_known_pos = self.pos.copy()
-        self.best_known_signal = Constants.MIN_SIGNAL_STRENGTH
-        self.ascent_direction = np.array([1.0, 0.0])
-        self.success_streak = 0
+
 
     def update_true_position(self, new_true_pos: np.ndarray):
         self.current_true_pos = new_true_pos
@@ -255,7 +224,7 @@ class HomingAlgorithm:
             self.dir_idx = 0
             self.scan_results = {}
 
-            # [핵심] 신호 세기에 따라 보폭(Step)과 탐색 반경(Radius) 결정
+            # 신호 세기에 따라 보폭, 탐색 반경 결정
             if rssi < self.params.SIGNAL_MID:
                 self.current_step = self.params.STEP_FAR  # 30m
                 self.current_radius = self.params.SCAN_RADIUS_FAR  # 20m
