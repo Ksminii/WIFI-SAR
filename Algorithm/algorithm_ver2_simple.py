@@ -29,16 +29,22 @@ class SimParams:
     TRANSMIT_POWER_DBM: float = 15.0
 
     # --- [알고리즘 파라미터] ---
-    STEP_FAR: float = 30.0
-    STEP_MID: float = 15.0
-    STEP_NEAR: float = 5.0
-    PROBE_DISTANCE: float = 20.0
+    # 신호 강도에 따라 적용할 이동 보폭 (Step Size)
+    STEP_FAR: float = 30.0  # 신호 약함 (< -55): 30m 이동
+    STEP_MID: float = 15.0  # 신호 중간: 15m 이동
+    STEP_NEAR: float = 5.0  # 신호 강함 (> -45): 5m 이동
 
+    # 탐색을 위해 실제로 갔다 오는 거리 (Radius)
+    SCAN_RADIUS_FAR: float = 20.0  # 멀 때는 20m씩 왕복
+    SCAN_RADIUS_MID: float = 10.0  # 중간엔 10m씩 왕복
+    SCAN_RADIUS_NEAR: float = 5.0  # 가까우면 5m씩 왕복
+    # ------------------------
+
+    # 신호 강도 기준점
     SIGNAL_MID: float = -50.0
     SIGNAL_NEAR: float = -40.0
     SIGNAL_PINPOINT: float = -35.0
 
-    # ------------------------
     DIST_FAR: float = 15.0
     DIST_MID: float = 5.0
     DIST_NEAR: float = 3.0
@@ -47,10 +53,11 @@ class SimParams:
     STUCK_THRESHOLD: int = 3
     ESCAPE_DISTANCE: float = 25.0
     ASCENT_THRESHOLD: float = -60.0
+    PROBE_DISTANCE: float = 20.0  # (사용 안 함, 위 SCAN_RADIUS로 대체됨)
 
     GPS_DRIFT_FACTOR: float = 0.8
     ROTATION_PENALTY_TIME: float = 1.5
-    DRONE_SPEED: float = 15.0
+    DRONE_SPEED: float = 15.0  # 속도 상향
     RSSI_SCAN_TIME: float = 0.5
     TIME_LIMIT: float = 100000.0
     GPS_ERROR_STD: float = 3.0
@@ -123,7 +130,6 @@ class SimulationEnvironment:
 # 3. HomingAlgorithm Class (십자 탐색)
 # --------------------------------------------------------------------------
 class HomingAlgorithm:
-
     def __init__(self, start_pos: np.ndarray, params: SimParams):
         self.pos = np.array(start_pos, dtype=float)
         self.waypoint = np.array(start_pos, dtype=float)
@@ -131,13 +137,13 @@ class HomingAlgorithm:
         self.params = params
         self.is_finished = False
 
-        # 상태 머신
+        # 상태 머신: INIT -> OUT -> IN -> DECIDE -> MOVE -> INIT
         self.state = "INIT"
         self.center_pos = start_pos.copy()
 
-        # 현재 적용 중인 스캔 반경과 이동 보폭
-        self.current_step_size = self.params.STEP_FAR
-        self.current_scan_radius = 20.0  # 초기값
+        # 현재 단계에서 사용할 보폭과 탐색 반경
+        self.current_step = self.params.STEP_FAR
+        self.current_radius = self.params.SCAN_RADIUS_FAR
 
         self.directions = [
             np.array([1.0, 0.0]), np.array([-1.0, 0.0]),
@@ -146,12 +152,11 @@ class HomingAlgorithm:
         self.dir_idx = 0
         self.scan_results = {}
 
+        # 통계 및 호환성 변수
         self.waypoint_count = 0
         self.smoothed_rssi = Constants.MIN_SIGNAL_STRENGTH
         self.true_path = [start_pos.copy()]
         self.current_true_pos = start_pos.copy()
-
-        # 호환성 더미
         self.last_signal = Constants.MIN_SIGNAL_STRENGTH
         self.stuck_counter = 0
         self.best_known_pos = self.pos.copy()
@@ -178,46 +183,48 @@ class HomingAlgorithm:
         if self.is_finished: return
         self.smoothed_rssi = rssi
 
-        # 도착 판정 (GPS 오차 고려)
+        # 도착 판정 (GPS 오차 고려 2.5m)
         dist = np.linalg.norm(self.pos - self.waypoint)
         arrived = dist < 2.5
 
-        # --- State Machine ---
-
+        # --- 상태 머신 ---
         if self.state == "INIT":
             self.center_pos = self.pos.copy()
             self.dir_idx = 0
             self.scan_results = {}
 
-            if rssi < self.params.SIGNAL_MID:  # 멀다 (< -50)
-                self.current_step_size = self.params.STEP_FAR  # 이동 30m
-                self.current_scan_radius = 20.0  # 탐색 20m (크게)
-            elif rssi < self.params.SIGNAL_NEAR:  # 중간 (-50 ~ -40)
-                self.current_step_size = self.params.STEP_MID  # 이동 15m
-                self.current_scan_radius = 10.0  # 탐색 10m
-            else:  # 가깝다 (> -45)
-                self.current_step_size = self.params.STEP_NEAR  # 이동 5m
-                self.current_scan_radius = 5.0  # 탐색 5m (작게)
+            # [핵심] 신호 세기에 따라 보폭(Step)과 탐색 반경(Radius) 결정
+            if rssi < self.params.SIGNAL_MID:
+                self.current_step = self.params.STEP_FAR  # 30m
+                self.current_radius = self.params.SCAN_RADIUS_FAR  # 20m
+            elif rssi < self.params.SIGNAL_NEAR:
+                self.current_step = self.params.STEP_MID  # 15m
+                self.current_radius = self.params.SCAN_RADIUS_MID  # 10m
+            else:
+                self.current_step = self.params.STEP_NEAR  # 5m
+                self.current_radius = self.params.SCAN_RADIUS_NEAR  # 5m
 
-            # 첫 탐색 출발 (가변 반경 적용)
-            target = self.center_pos + self.directions[self.dir_idx] * self.current_scan_radius
+            # 첫 방향(동쪽) 탐색 출발
+            target = self.center_pos + self.directions[self.dir_idx] * self.current_radius
             self.waypoint = target
             self.state = "OUTBOUND"
             self.waypoint_count += 1
 
         elif self.state == "OUTBOUND":
             if arrived:
+                # 끝점 도착 -> 측정값 저장
                 self.scan_results[self.dir_idx] = rssi
+                # 중심으로 복귀 명령
                 self.waypoint = self.center_pos
                 self.state = "INBOUND"
                 self.waypoint_count += 1
 
         elif self.state == "INBOUND":
             if arrived:
+                # 중심 복귀 완료 -> 다음 방향 설정
                 self.dir_idx += 1
                 if self.dir_idx < 4:
-                    # 다음 방향 출발 (가변 반경 적용)
-                    target = self.center_pos + self.directions[self.dir_idx] * self.current_scan_radius
+                    target = self.center_pos + self.directions[self.dir_idx] * self.current_radius
                     self.waypoint = target
                     self.state = "OUTBOUND"
                     self.waypoint_count += 1
@@ -234,20 +241,20 @@ class HomingAlgorithm:
                     best_idx = idx
 
             if best_idx != -1:
-                # 가장 좋은 방향으로 '보폭'만큼 이동
+                # 가장 좋은 방향으로 '보폭(Step)'만큼 실제 이동
                 best_dir = self.directions[best_idx]
-                new_center = self.center_pos + best_dir * self.current_step_size
+                new_center = self.center_pos + best_dir * self.current_step
 
                 self.waypoint = new_center
                 self.center_pos = new_center
                 self.state = "MOVING_CENTER"
                 self.waypoint_count += 1
             else:
-                self.state = "INIT"
+                self.state = "INIT"  # 예외 처리
 
         elif self.state == "MOVING_CENTER":
             if arrived:
-                self.state = "INIT"
+                self.state = "INIT"  # 도착했으면 다시 탐색 시작
 
 # --------------------------------------------------------------------------
 # 4. 시각화 클래스
@@ -314,8 +321,17 @@ class SimulationVisualizer:
         self.ax.grid(True, linestyle='--', alpha=0.3)
         self.ax.legend(loc='upper right')
 
-        self.ax.set_xlim(true_pos[0] - self.view_radius, true_pos[0] + self.view_radius)
-        self.ax.set_ylim(true_pos[1] - self.view_radius, true_pos[1] + self.view_radius)
+        if status == "SUCCESS" and len(self.path_history) > 0:
+            path_arr = np.array(self.path_history)
+            all_x = np.append(path_arr[:, 0], [env.hotspot_pos[0]])
+            all_y = np.append(path_arr[:, 1], [env.hotspot_pos[1]])
+            margin = 30.0
+            self.ax.set_xlim(np.min(all_x) - margin, np.max(all_x) + margin)
+            self.ax.set_ylim(np.min(all_y) - margin, np.max(all_y) + margin)
+        else:
+            self.ax.set_xlim(true_pos[0] - self.view_radius, true_pos[0] + self.view_radius)
+            self.ax.set_ylim(true_pos[1] - self.view_radius, true_pos[1] + self.view_radius)
+
         plt.pause(0.00001)
 
     def close(self):
