@@ -27,7 +27,8 @@ WIFI-SAR/
 │   ├── algorithm_ewma_v1.1.py             EWMA 평활화
 │   ├── algorithm_ewma_v1.1.py             EWMA 평활화
 │   ├── algorithm_ver1.py                  논문 작성 알고리즘
-│   └── algorithm_ver2_simple.py           상하좌우 이동
+│   ├── algorithm_ver2_simple.py           상하좌우 이동
+│   └── algorithm_ver3_upgrade.py          상하좌우 업그레이드 알고리즘
 │
 └── Drone/                                  # 하드웨어 구현
     ├── README.md                           하드웨어 설정 가이드
