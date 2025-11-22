@@ -34,9 +34,9 @@ class SimParams:
     STEP_NEAR: float = 5.0  # 신호 강함 (> -45): 5m 이동
 
     # 탐색을 위해 실제로 갔다 오는 거리 (Radius)
-    SCAN_RADIUS_FAR: float = 20.0  # 멀 때는 20m씩 왕복
-    SCAN_RADIUS_MID: float = 10.0  # 중간엔 10m씩 왕복
-    SCAN_RADIUS_NEAR: float = 5.0  # 가까우면 5m씩 왕복
+    SCAN_RADIUS_FAR: float = 30.0  # 멀 때는 20m씩 왕복
+    SCAN_RADIUS_MID: float = 15.0  # 중간엔 10m씩 왕복
+    SCAN_RADIUS_NEAR: float = 8.0  # 가까우면 5m씩 왕복
 
     # 신호 강도 기준점
     SIGNAL_MID: float = -50.0
@@ -48,7 +48,7 @@ class SimParams:
     GPS_DRIFT_FACTOR: float = 0.8  # (0~1) GPS 오차의 표류 강도. 0이면 매번 독립적인 오차(표류 없음), 1에 가까울수록 오차가 천천히 변함.
     ROTATION_PENALTY_TIME: float = 1.5
     DRONE_SPEED: float = 8.0
-    RSSI_SCAN_TIME: float = 2.0
+    RSSI_SCAN_TIME: float = 0.0
     TIME_LIMIT: float = 100000.0
     GPS_ERROR_STD: float = 3.0  # [최적화] 8.0 → 3.0m (드론용 RTK GPS)
     RSSI_SHADOW_STD: float = 1.0
@@ -163,7 +163,7 @@ class SimulationEnvironment:
 
 
 # --------------------------------------------------------------------------
-# 3. HomingAlgorithm Class (십자 탐색)
+# 3. HomingAlgorithm Class
 # --------------------------------------------------------------------------
 class HomingAlgorithm:
     def __init__(self, start_pos: np.ndarray, params: SimParams):
@@ -173,27 +173,36 @@ class HomingAlgorithm:
         self.params = params
         self.is_finished = False
 
-        # 상태 머신: INIT -> OUT -> IN -> DECIDE -> MOVE -> INIT
+        # 상태: INIT -> SCANNING -> MOVING_TO_NEXT -> INIT
         self.state = "INIT"
         self.center_pos = start_pos.copy()
 
-        # 현재 단계에서 사용할 보폭과 탐색 반경
-        self.current_step = self.params.STEP_FAR
-        self.current_radius = self.params.SCAN_RADIUS_FAR
+        # 탐색할 방향 순서 관리
+        self.scan_queue = []
 
-        self.directions = [
-            np.array([1.0, 0.0]), np.array([-1.0, 0.0]),
-            np.array([0.0, -1.0]), np.array([0.0, 1.0])
-        ]
-        self.dir_idx = 0
+        # 값 저장소
         self.scan_results = {}
 
-        # 통계 및 호환성 변수
+        self.skip_dir = None  # 생략할 방향
+        self.prev_center_rssi = -999.0  # 이전 중심 RSSI
+
+        # 방향 벡터
+        self.dirs = {
+            'right': np.array([1.0, 0.0]),
+            'left': np.array([-1.0, 0.0]),
+            'up': np.array([0.0, 1.0]),
+            'down': np.array([0.0, -1.0])
+        }
+
+        # 통계 변수
         self.waypoint_count = 0
         self.smoothed_rssi = Constants.MIN_SIGNAL_STRENGTH
         self.true_path = [start_pos.copy()]
         self.current_true_pos = start_pos.copy()
 
+        # 현재 스텝/반경
+        self.current_step = self.params.STEP_FAR
+        self.current_radius = self.params.SCAN_RADIUS_FAR
 
     def update_true_position(self, new_true_pos: np.ndarray):
         self.current_true_pos = new_true_pos
@@ -214,78 +223,96 @@ class HomingAlgorithm:
         if self.is_finished: return
         self.smoothed_rssi = rssi
 
-        # 도착 판정 (GPS 오차 고려 2.5m)
+        # 도착 판정 (2.5m)
         dist = np.linalg.norm(self.pos - self.waypoint)
         arrived = dist < 2.5
 
-        # --- 상태 머신 ---
+        # --- 로직 시작 ---
         if self.state == "INIT":
+            # 1. 현재 위치(중심) 정보 저장
+            self.prev_center_rssi = rssi
             self.center_pos = self.pos.copy()
-            self.dir_idx = 0
             self.scan_results = {}
 
-            # 신호 세기에 따라 보폭, 탐색 반경 결정
+            # 2. 파라미터 설정
             if rssi < self.params.SIGNAL_MID:
-                self.current_step = self.params.STEP_FAR  # 30m
-                self.current_radius = self.params.SCAN_RADIUS_FAR  # 20m
+                self.current_step = self.params.STEP_FAR
+                self.current_radius = self.params.SCAN_RADIUS_FAR
             elif rssi < self.params.SIGNAL_NEAR:
-                self.current_step = self.params.STEP_MID  # 15m
-                self.current_radius = self.params.SCAN_RADIUS_MID  # 10m
+                self.current_step = self.params.STEP_MID
+                self.current_radius = self.params.SCAN_RADIUS_MID
             else:
-                self.current_step = self.params.STEP_NEAR  # 5m
-                self.current_radius = self.params.SCAN_RADIUS_NEAR  # 5m
+                self.current_step = self.params.STEP_NEAR
+                self.current_radius = self.params.SCAN_RADIUS_NEAR
 
-            # 첫 방향(동쪽) 탐색 출발
-            target = self.center_pos + self.directions[self.dir_idx] * self.current_radius
-            self.waypoint = target
-            self.state = "OUTBOUND"
-            self.waypoint_count += 1
+            # 3. 탐색할 방향 큐 생성 (스킵할 방향 제외)
+            # 순서: 우 -> 좌 -> 상 -> 하 (원하는 순서대로 배치)
+            full_order = ['right', 'left', 'up', 'down']
+            self.scan_queue = []
 
-        elif self.state == "OUTBOUND":
-            if arrived:
-                # 끝점 도착 -> 측정값 저장
-                self.scan_results[self.dir_idx] = rssi
-                # 중심으로 복귀 명령
-                self.waypoint = self.center_pos
-                self.state = "INBOUND"
-                self.waypoint_count += 1
-
-        elif self.state == "INBOUND":
-            if arrived:
-                # 중심 복귀 완료 -> 다음 방향 설정
-                self.dir_idx += 1
-                if self.dir_idx < 4:
-                    target = self.center_pos + self.directions[self.dir_idx] * self.current_radius
-                    self.waypoint = target
-                    self.state = "OUTBOUND"
-                    self.waypoint_count += 1
+            for d in full_order:
+                if d == self.skip_dir:
+                    # 스킵하는 방향은 미리 결과에 저장해둠 (가지는 않음)
+                    self.scan_results[d] = self.prev_center_rssi  # 근사치로 이전 중심값 사용
                 else:
-                    self.state = "DECIDING"
+                    self.scan_queue.append(d)
 
-        if self.state == "DECIDING":
-            best_idx = -1
-            best_rssi = -9999.0
-
-            for idx, val in self.scan_results.items():
-                if val > best_rssi:
-                    best_rssi = val
-                    best_idx = idx
-
-            if best_idx != -1:
-                # 가장 좋은 방향으로 '보폭(Step)'만큼 실제 이동
-                best_dir = self.directions[best_idx]
-                new_center = self.center_pos + best_dir * self.current_step
-
-                self.waypoint = new_center
-                self.center_pos = new_center
-                self.state = "MOVING_CENTER"
+            # 4. 첫 번째 탐색지로 출발
+            if self.scan_queue:
+                first_dir = self.scan_queue[0]
+                target = self.center_pos + self.dirs[first_dir] * self.current_radius
+                self.waypoint = target
+                self.state = "SCANNING"
                 self.waypoint_count += 1
             else:
-                self.state = "INIT"  # 예외 처리
+                # 예외처리: 갈 곳이 없으면(그럴리 없지만) 그냥 끝냄
+                self.is_finished = True
 
-        elif self.state == "MOVING_CENTER":
+
+        elif self.state == "SCANNING":
             if arrived:
-                self.state = "INIT"  # 도착했으면 다시 탐색 시작
+                # 1. 방금 도착한 곳의 RSSI 저장
+                # 현재 큐의 0번째가 방금 도착한 곳임
+                if self.scan_queue:
+                    completed_dir = self.scan_queue.pop(0)  # 완료된 방향 제거
+                    self.scan_results[completed_dir] = rssi
+
+                # 2. 다음 갈 곳이 남았나?
+                if self.scan_queue:
+                    # 남았으면 다음 방향 찍으러 이동 (중심 안 거치고 바로 이동)
+                    next_dir = self.scan_queue[0]
+                    target = self.center_pos + self.dirs[next_dir] * self.current_radius
+                    self.waypoint = target
+                    # 상태는 그대로 SCANNING 유지
+                    self.waypoint_count += 1
+
+                else:
+                    # 3. 큐가 비었음 -> 모든 탐색 끝! -> [여기서 바로 결정]
+                    # 현재 위치는 마지막 탐색 지점(예: Down)에 있음.
+                    # 중심에 가지 않고 여기서 바로 계산해서 다음 중심(Next Center)으로 쏨.
+
+                    best_dir_name = max(self.scan_results, key=self.scan_results.get)
+
+                    # 다음 스텝 준비 (후방 생략 설정)
+                    reverse_map = {'right': 'left', 'left': 'right', 'up': 'down', 'down': 'up'}
+                    self.skip_dir = reverse_map[best_dir_name]
+
+                    # 다음 중심 계산
+                    best_vec = self.dirs[best_dir_name]
+                    next_center = self.center_pos + best_vec * self.current_step
+
+                    # [핵심] 현재 위치(마지막 탐색지)에서 -> 다음 중심으로 바로 이동
+                    self.waypoint = next_center
+
+                    # 상태 변경: 이동 중
+                    self.state = "MOVING_TO_NEXT"
+                    self.waypoint_count += 1
+
+
+        elif self.state == "MOVING_TO_NEXT":
+            if arrived:
+                # 다음 중심 도착 완료. 다시 초기화 후 탐색 반복
+                self.state = "INIT"
 
 # --------------------------------------------------------------------------
 # 4. 시각화 클래스
@@ -699,6 +726,9 @@ def main():
     else:
         print("Invalid input. Please enter 1 or 2.")
 
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()
