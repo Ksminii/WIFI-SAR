@@ -9,8 +9,9 @@ Algorithm/
 ├── algorithm_ewma_v1.1.py           # EWMA 기반 알고리즘
 ├── algorithm_ewma_fading_v1.2.py    # EWMA + Momentum 알고리즘
 ├── algorithm_kalman_v1.0.py         # Kalman Filter 알고리즘
-├── algrithm_ver1.py                 # 논문 작성 알고리즘
-└── algrithm_ver2_simple.py          # 상하좌우 탐색 알고리즘
+├── algorithm_ver1.py                 # 논문 작성 알고리즘
+├── algorithm_ver2_simple.py          # 상하좌우 탐색 알고리즘
+└── algorithm_ver3_upgrade.py          # 상하좌우 업그레이드 알고리즘
 ```
 
 ## 알고리즘 설명
@@ -42,6 +43,11 @@ Kalman Filter 기반 최적 상태 추정 알고리즘
 - 상하좌우 탐색 후 신호 강한 방향으로 이동
 - 상하좌우 탐색 반복
 - 보폭-이동거리 동적 변경
+
+### algorithm_ver3_upgrade.py
+- 상하좌우 탐색 -> 이동
+- 이동 시 신호가 향상되면 그쪽으로 더 전진 (상하좌우 탐색 생략)
+- 신호 약화 시 멈춰서 상하좌우 탐색 재개
 
 ## 실행 방법
 
