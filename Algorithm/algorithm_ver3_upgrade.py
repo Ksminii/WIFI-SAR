@@ -163,7 +163,7 @@ class SimulationEnvironment:
 
 
 # --------------------------------------------------------------------------
-# 3. HomingAlgorithm Class
+# 3. HomingAlgorithm Class (Backtracking: 실패 시 원점으로 복귀)
 # --------------------------------------------------------------------------
 class HomingAlgorithm:
     def __init__(self, start_pos: np.ndarray, params: SimParams):
@@ -172,8 +172,11 @@ class HomingAlgorithm:
         self.path = [start_pos.copy()]
         self.params = params
         self.is_finished = False
+        # [New] 실패한 지점 데이터 기억용
+        self.fail_rssi = None  # 실패한 곳의 RSSI
+        self.fail_dir_name = None  # 실패한 방향 이름
 
-        # 상태: INIT -> SCANNING -> MOVING_TO_NEXT -> (CHECK_TRUST) -> ...
+        # 상태: INIT -> SCANNING -> MOVING_TO_NEXT -> (RETURNING_TO_BEST) -> ...
         self.state = "INIT"
         self.center_pos = start_pos.copy()
 
@@ -182,9 +185,9 @@ class HomingAlgorithm:
         self.scan_results = {}
 
         # 이전 정보
-        self.skip_dir = None  # 후방 생략
+        self.skip_dir = None
         self.prev_center_rssi = -999.0
-        self.last_move_dir_name = None  # 방금 이동해온 방향 이름 (예: 'right')
+        self.last_move_dir_name = None
 
         # 벡터
         self.dirs = {
@@ -231,9 +234,9 @@ class HomingAlgorithm:
 
         # --- 로직 ---
 
-        # [1] 초기 탐색 준비 (탐색 모드 진입)
+        # [1] 초기 탐색 준비
         if self.state == "INIT":
-            self.prev_center_rssi = rssi  # 기준값 저장
+            self.prev_center_rssi = rssi
             self.center_pos = self.pos.copy()
             self.scan_results = {}
 
@@ -248,16 +251,22 @@ class HomingAlgorithm:
                 self.current_step = self.params.STEP_NEAR
                 self.current_radius = self.params.SCAN_RADIUS_NEAR
 
-            # 탐색 큐 생성 (후방 생략)
+            # [수정됨] 큐 생성 로직
             full_order = ['right', 'left', 'up', 'down']
             self.scan_queue = []
+
             for d in full_order:
                 if d == self.skip_dir:
-                    self.scan_results[d] = -999.0  # 그냥 매우 작은 값 (무시)
+                    self.scan_results[d] = -999.0
+                elif d == self.fail_dir_name:
+                    # 몸은 가지 않고, 아까 잰 값(fail_rssi)을 그대로 재활용
+                    self.scan_results[d] = self.fail_rssi
                 else:
                     self.scan_queue.append(d)
 
-            # 출발
+            self.fail_dir_name = None
+            self.fail_rssi = None
+
             if self.scan_queue:
                 first_dir = self.scan_queue[0]
                 target = self.center_pos + self.dirs[first_dir] * self.current_radius
@@ -268,67 +277,46 @@ class HomingAlgorithm:
                 self.is_finished = True
 
 
-        # [2] 주변 찌르기 (Scanning)
+        # [2] 주변 찌르기
         elif self.state == "SCANNING":
             if arrived:
-                # 결과 저장
                 if self.scan_queue:
                     done_dir = self.scan_queue.pop(0)
                     self.scan_results[done_dir] = rssi
 
-                # 다음 찌를 곳이 남았나?
                 if self.scan_queue:
-                    # 남았으면 바로 이동 (대각선 점프)
                     next_dir = self.scan_queue[0]
                     target = self.center_pos + self.dirs[next_dir] * self.current_radius
                     self.waypoint = target
                     self.waypoint_count += 1
-
                 else:
-                    # 다 찔러봄 -> 결정
-                    # 1. 최고 방향 찾기
                     best_dir_name = max(self.scan_results, key=self.scan_results.get)
-                    best_rssi = self.scan_results[best_dir_name]
-
-                    # 2. 만약 주변이 다 별로라면? (현재 위치보다 안 좋음)
-                    # -> 그래도 이동해야 함 (지역 최적점 탈출 위해)
-                    #    여기선 단순하게 최고 방향으로 이동
-
-                    # 3. 이동 설정
                     best_vec = self.dirs[best_dir_name]
                     next_center = self.center_pos + best_vec * self.current_step
 
                     self.waypoint = next_center
 
-                    # 다음 턴을 위한 변수 세팅
                     reverse_map = {'right': 'left', 'left': 'right', 'up': 'down', 'down': 'up'}
-                    self.skip_dir = reverse_map[best_dir_name]  # 다음엔 뒤쪽 안 봄
-                    self.last_move_dir_name = best_dir_name  # 방금 이쪽으로 이동했다고 기억
+                    self.skip_dir = reverse_map[best_dir_name]
+                    self.last_move_dir_name = best_dir_name
 
-                    # 상태 변경
                     self.state = "MOVING_TO_NEXT"
                     self.waypoint_count += 1
 
 
-        # [3] 중심으로 이동 중
+        # [3] 중심으로 이동 중 (직진 구간)
         elif self.state == "MOVING_TO_NEXT":
             if arrived:
-                # 도착! 여기서 바로 판단 (Trust Check)
-                # "방금 이동해서 신호가 좋아졌는가?"
-
-                # 노이즈 고려해서 비슷하면(-1.0) 좋아진 걸로 침
+                # Trust Check: 신호가 좋아졌는가?
+                # 노이즈 고려 (-1.0dB 까지는 봐줌)
                 if rssi >= self.prev_center_rssi - 1.0:
-                    # [성공!] 신호가 좋아짐 -> 탐색(INIT) 생략하고 직진!
-
-                    # 현재 위치를 새로운 기준점으로 업데이트
+                    # [성공] 신호 좋음 -> 계속 직진 (탐색 생략)
                     self.prev_center_rssi = rssi
-                    self.center_pos = self.pos.copy()
+                    self.center_pos = self.pos.copy()  # 현재 위치를 새 베이스캠프로 확정
 
-                    # 같은 방향으로 계속 이동
                     move_vec = self.dirs[self.last_move_dir_name]
 
-                    # [가속] 신호가 좋아서 연속 이동할 때는 보폭을 조금 늘림 (1.2배)
-                    # 보폭 조절 (거리별 리셋 방지)
+                    # 보폭 설정
                     if rssi > self.params.SIGNAL_PINPOINT:
                         step = self.params.STEP_NEAR
                     elif rssi > self.params.SIGNAL_NEAR:
@@ -337,14 +325,31 @@ class HomingAlgorithm:
                         step = self.params.STEP_FAR
 
                     next_center = self.center_pos + move_vec * (step * 1.2)
-
                     self.waypoint = next_center
-                    self.state = "MOVING_TO_NEXT"  # 상태 유지 (계속 이동)
+                    self.state = "MOVING_TO_NEXT"
                     self.waypoint_count += 1
 
                 else:
-                    # [실패] 신호가 나빠짐 -> 길을 잃음 -> 탐색 모드 발동
-                    self.state = "INIT"
+                    # [실패] 신호가 나빠짐
+                    # 현재 위치(나쁜 곳)에서 탐색하지 않고,
+                    # 저장해둔 이전 베이스캠프(self.center_pos)로 복귀 명령
+                    self.fail_rssi = rssi
+                    self.fail_dir_name = self.last_move_dir_name  # 방금 온 방향
+                    # 복귀 웨이포인트 설정 (이전 중심점)
+                    # self.center_pos는 아직 업데이트되지 않았으므로 '이전 좋은 위치'임
+                    self.waypoint = self.center_pos
+
+                    self.state = "RETURNING_TO_BEST"
+                    self.waypoint_count += 1
+
+
+        # [4] 복귀 중 (Backtracking)
+        elif self.state == "RETURNING_TO_BEST":
+            if arrived:
+                # 안전하게 베이스캠프 복귀 완료
+                # 이제 여기서부터 다시 정석대로 4방향 탐색 시작
+                self.state = "INIT"
+                self.skip_dir = None
 
 # --------------------------------------------------------------------------
 # 4. 시각화 클래스
