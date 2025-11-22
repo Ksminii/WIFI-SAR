@@ -12,30 +12,38 @@
 ```
 WIFI-SAR/
 │
-├── README.md                               # 프로젝트 전체 개요 
+├── README.md                               # 프로젝트 전체 개요
+│
+├── Algorithm/                              # 탐색 알고리즘 구현
+│   ├── README.md                           알고리즘 상세 설명
+│   ├── algorithm_ver1.py                  논문 기반 알고리즘
+│   ├── algorithm_ver2_simple.py           상하좌우 단순 이동
+│   ├── algorithm_ver3_upgrade.py          상하좌우 업그레이드 알고리즘
+│   ├── algorithm_kalman_v1.0.py           Kalman Filter 적용
+│   ├── algorithm_ewma_v1.1.py             EWMA 평활화
+│   └── algorithm_ewma_fading_v1.2.py      EWMA + 페이딩 모델
 │
 ├── Simulator/                              # 시뮬레이션 환경
 │   ├── README.md                           시뮬레이터 상세 가이드
 │   ├── simulator_base_v2.0.py             기본 시뮬레이터
 │   ├── simulator_fading_v2.1.py           페이딩 모델 시뮬레이터
-│   ├── tempsim1.py                        실험용
 │   └── final_simulator.py                 최종 시뮬레이터
 │
-├── Algorithm/                              # 알고리즘 구현
-│   ├── README.md                           알고리즘 상세 설명
-│   ├── algorithm_kalman_v1.0.py           Kalman Filter
-│   ├── algorithm_ewma_v1.1.py             EWMA 평활화
-│   ├── algorithm_ewma_v1.1.py             EWMA 평활화
-│   ├── algorithm_ver1.py                  논문 작성 알고리즘
-│   ├── algorithm_ver2_simple.py           상하좌우 이동
-│   └── algorithm_ver3_upgrade.py          상하좌우 업그레이드 알고리즘
+├── Drone/                                  # 드론 제어 (GPS 기반)
+│   ├── README.md                           하드웨어 설정 가이드
+│   ├── simple.py                          기본 드론 제어
+│   ├── simple_move.py                     이동 제어
+│   ├── simple_search.py                   탐색 제어
+│   └── rssi_monitor.py                    RSSI 모니터링
 │
-└── Drone/                                  # 하드웨어 구현
-    ├── README.md                           하드웨어 설정 가이드
-    ├── simple.py                          5방향 탐색 (Python)
-    ├── simple_search.py                   4방향 탐색 (Python)
-    ├── rssi_monitor.py                    RSSI 모니터링
-    ├── simple.cpp                         C++ 구현
-    └── CMakeLists.txt                     빌드 설정
+├── Drone_NoGPS/                            # 드론 제어 (GPS 미사용)
+│   ├── simple_noGPS.py                    기본 제어 (No GPS)
+│   ├── simple_move_noGPS.py               이동 제어 (No GPS)
+│   └── simple_search_noGPS.py             탐색 제어 (No GPS)
+│
+└── RSSI/                                   # RSSI 신호 처리
+    ├── rssi_watch.py                      기본 RSSI 모니터링
+    ├── rssi_watch_EMA.py                  EMA 필터 적용
+    └── rssi_watch_Kalman.py               Kalman 필터 적용
 ```
 
