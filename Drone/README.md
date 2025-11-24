@@ -1,7 +1,4 @@
 
-
-# 파라미터는 적당히 수정하세요
-
 ##  파일 구조
 
 #### Python 버전 
@@ -22,7 +19,7 @@ simple_move.cpp         # 4방향 이동 테스트  (신호 측정 x)
 ---
 
 
-###  하드웨어 구성
+###  시스템 구성
 
 ```
 실종자 휴대폰 (Wi-Fi 신호)
@@ -103,25 +100,6 @@ python3 simple.py
 # - 중앙이 최고 신호면 종료
 ```
 
-#### simple_move.py - 이동 기능 테스트
-
-```bash
-# 신호 측정 없이 이동만 테스트
-python3 simple_move.py
-
-# 북 → 동 → 남 → 서 순서로 이동
-# 각 방향 10m씩 이동 후 복귀
-```
-
-#### simple_search.py - 4방향 탐색
-
-```bash
-# 4방향 탐색 (각 방향마다 원위치 복귀)
-python3 simple_search.py
-
-# 5방향보다 이동 횟수 많음 (8회 vs 6회)
-```
-
 ---
 
 ### C++ 버전
@@ -182,19 +160,6 @@ vehicle = connect('/dev/ttyAMA0', wait_ready=True, baud=57600)
 ```
 
 
-
-##  문제 해결
-
-### Python 3.12 호환성
-
-
-```python
-# Python 3.12 호환성 패치
-import collections
-import collections.abc
-collections.MutableMapping = collections.abc.MutableMapping
-```
-
 ### Wi-Fi 모니터 모드 확인
 
 ```bash
@@ -230,108 +195,6 @@ python3 -c "from dronekit import connect; vehicle = connect('/dev/ttyAMA0', wait
 
 
 
-## 프로젝트 구조
 
-```
-Drone/
-├── README.md                   
-│
-├── Python 버전 (권장)
-│   ├── simple.py               # 5방향 탐색 (메인)
-│   ├── simple_search.py        # 4방향 탐색
-│   └── simple_move.py          # 이동 테스트
-│
-└── C++ 버전
-    ├── simple.cpp              # 5방향 탐색 (메인)
-    ├── simple_search.cpp       # 4방향 탐색
-    └── simple_move.cpp         # 이동 테스트
-```
-
----
-
-##  주요 특징
-
-### 1. 5방향 탐색 알고리즘 (simple.py/cpp)
-
-- 중앙 지점 포함으로 정점 감지 가능
-- 6회 이동으로 효율적 탐색
-- 중앙이 최고 신호면 탐색 종료
-
-### 2. NED 로컬 좌표계
-
-- EKF 준비 대기 로직
-- 안전한 위치 제어
-- 정밀한 상대 위치 이동
-
-### 3. 정밀 RSSI 측정
-
-- tshark 기반 비컨 프레임 분석
-- 3회 측정 후 평균
-- Outlier 제거 (15개 이상 샘플 시)
-
-### 4. 적응형 종료 조건
-
-- 신호 강도 임계값
-- 중앙 정점 감지
-- 최대 라운드 제한
-
----
-
-##  실제 사용 시나리오
-
-```
-1. 라즈베리파이 부팅 및 SSH 접속
-   ssh pi@raspberrypi.local
-
-2. 코드 디렉토리 이동
-   cd ~/drone_project/Drone
-
-3. 설정 확인 (SSID, 거리 등)
-   nano simple.py
-
-4. 드론 수동 이륙 (조종기)
-   - 10m 정도 이륙
-   - GUIDED 모드로 변경
-
-5. Python 스크립트 실행
-   source ~/drone_venv/bin/activate
-   python3 simple.py
-
-6. 자동 탐색 시작
-   - 5방향 신호 측정
-   - 최고 신호 방향으로 이동
-   - 반복
-
-7. 종료 조건 만족 시 자동 착륙
-   - 신호 강도 -20dBm 이상
-   - 중앙이 최고 신호
-   - 최대 5라운드 완료
-```
-
----
-
-## 주의사항
-
-1. **실제 비행 전 반드시 테스트**
-   - simple_move.py로 이동 기능 확인
-   - 안전한 환경에서 알고리즘 검증
-
-2. **안전 거리 유지**
-   - SEARCH_DISTANCE 초기값 작게 시작
-   - 장애물 확인
-
-3. **배터리 모니터링**
-   - 충분한 배터리 용량 확인
-   - 귀환 예비 배터리 고려
-
-4. **Wi-Fi 모니터 모드**
-   - 모니터 모드 설정 필수
-   - 테스트로 RSSI 측정 확인
-
-5. **픽스호크 펌웨어**
-   - ArduCopter 또는 PX4 설치
-   - MAVLink 통신 활성화
-
----
 
 
