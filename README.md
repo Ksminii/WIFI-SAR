@@ -43,6 +43,7 @@ WIFI-SAR/
 │       └── rssi_monitor.py                RSSI 모니터링
 │
 ├── Drone_NoGPS/                            # 드론 제어 (GPS 미사용)
+│   ├── README.md                          상세 설명
 │   ├── simple_noGPS.py                    기본 제어 (No GPS)
 │   ├── simple_move_noGPS.py               이동 제어 (No GPS)
 │   └── simple_search_noGPS.py             탐색 제어 (No GPS)
@@ -51,7 +52,13 @@ WIFI-SAR/
 │   ├── README.md                          시뮬레이터 사용 가이드
 │   └── index.html                         4방향 전수 조사
 │
+├── object_detection/                       # 객체 탐지 (YOLOv8)
+│   ├── README.txt                         상세 설명
+│   ├── detection.py                       객체 탐지 스크립트
+│   └── small_model/                       경량화 모델
+│
 └── RSSI/                                   # RSSI 신호 처리
+    ├── README.md                          상세 설명
     ├── rssi_watch.py                      기본 RSSI 모니터링
     ├── rssi_watch_EMA.py                  EMA 필터 적용
     └── rssi_watch_Kalman.py               Kalman 필터 적용
