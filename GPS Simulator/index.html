@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>GPS Pro (Wide Scan)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; touch-action: none; }
+        .map-canvas { background-color: #1a202c; touch-action: none; }
+        .compass { 
+            width: 60px; height: 60px; 
+            border: 2px solid #10B981; border-radius: 50%; 
+            position: relative; background: rgba(0,0,0,0.7);
+        }
+        .direction-arrow { 
+            position: absolute; top: 50%; left: 50%; 
+            width: 4px; height: 25px; background: #EF4444; 
+            transform-origin: bottom center; transform: translate(-50%, -100%);
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex flex-col h-screen p-4">
+
+    <header class="text-center mb-2">
+        <h1 class="text-xl font-bold text-cyan-400">GPS Pro (Wide Scan)</h1>
+        <p id="status" class="text-xs text-gray-400">GPS 대기 중...</p>
+    </header>
+
+    <div class="relative flex-grow rounded-xl overflow-hidden border-2 border-gray-700 mb-4">
+        <canvas id="mapCanvas" class="map-canvas"></canvas>
+        
+        <button id="btn-center" class="absolute top-2 right-2 bg-gray-700/80 p-2 rounded text-xs border border-gray-500 font-bold active:bg-gray-600">📍 내 위치로</button>
+
+        <div class="absolute top-2 left-2 bg-black/60 p-2 rounded text-xs pointer-events-none">
+            <div class="compass mb-2"><div id="arrow" class="direction-arrow"></div></div>
+            <div>목표: <span id="bearing" class="text-cyan-300">0°</span></div>
+            <div>나: <span id="heading" class="text-green-300">0°</span></div>
+        </div>
+        <div class="absolute bottom-2 right-2 bg-black/60 p-2 rounded text-xs text-right pointer-events-none">
+            <div id="gps-lat">Lat: -</div>
+            <div id="gps-lon">Lon: -</div>
+            <div id="gps-acc" class="text-yellow-300">Acc: -</div>
+        </div>
+    </div>
+
+    <div class="bg-gray-800 p-4 rounded-xl space-y-3">
+        <div class="flex justify-between text-sm">
+            <span>상태: <b id="algo-state" class="text-yellow-300">IDLE</b></span>
+            <span>거리: <b id="target-dist" class="text-green-400">0.0m</b></span>
+        </div>
+        
+        <div id="input-area" class="hidden">
+            <p class="text-center text-sm mb-2 text-green-300 font-bold" id="msg">RSSI 입력</p>
+            <div class="flex gap-2">
+                <input type="number" id="rssi-in" class="flex-1 bg-gray-700 p-2 rounded text-center text-white" placeholder="-55">
+                <button id="btn-submit" class="bg-blue-600 px-4 rounded font-bold active:scale-95 transition">입력</button>
+            </div>
+        </div>
+        
+        <button id="btn-start" class="w-full bg-green-600 py-3 rounded font-bold hidden active:scale-95 transition">테스트 시작</button>
+        
+        <button id="btn-log" class="w-full bg-gray-600 py-2 rounded text-xs text-gray-300 mt-2 hidden">로그 저장 (0)</button>
+    </div>
+
+    <script>
+        // --- Constants ---
+        const PARAMS = {
+            ARRIVAL_DIST: 2.5,    
+            TARGET_RSSI: -55.0,   
+            DEAD_ZONE: -80.0,     
+            
+            // [수정됨] 직진할 때 보폭 (기존 유지)
+            STEP: { FAR: 30, MID: 15, NEAR: 5 },
+            
+            // [수정됨] 4방향 탐색 반경 (더 넓게 확장)
+            SCAN: { FAR: 50, MID: 25, NEAR: 12 } 
+        };
+
+        // --- Globals ---
+        let myPos = null;   
+        let targetPos = null; 
+        let centerPos = null; 
+        let originPos = null; 
+        let phoneHeading = 0;
+        let pathHistory = []; 
+        let visitedWaypoints = []; 
+        let logData = []; 
+
+        let algoState = "IDLE";
+        let scanQueue = [];
+        let scanRssi = {};
+        let prevBestRssi = -999;
+        let lastDirName = null;
+        let skipDir = null;
+        let failRssi = null; 
+        let failDir = null;
+
+        let cam = { x: 0, y: 0, zoom: 2.0 }; // Zoom out slightly for wider scan
+        let isTracking = true; 
+
+        // --- Utils ---
+        function getDist(p1, p2) {
+            if(!p1 || !p2) return 0;
+            const R = 6371e3;
+            const φ1 = p1.lat * Math.PI/180, φ2 = p2.lat * Math.PI/180;
+            const Δφ = (p2.lat-p1.lat) * Math.PI/180;
+            const Δλ = (p2.lon-p1.lon) * Math.PI/180;
+            const a = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2) * Math.sin(Δλ/2)**2;
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }
+
+        function getBearing(p1, p2) {
+            if(!p1 || !p2) return 0;
+            const y = Math.sin(p2.lon*Math.PI/180 - p1.lon*Math.PI/180) * Math.cos(p2.lat*Math.PI/180);
+            const x = Math.cos(p1.lat*Math.PI/180)*Math.sin(p2.lat*Math.PI/180) -
+                      Math.sin(p1.lat*Math.PI/180)*Math.cos(p2.lat*Math.PI/180)*Math.cos(p2.lon*Math.PI/180 - p1.lon*Math.PI/180);
+            return (Math.atan2(y, x) * 180/Math.PI + 360) % 360;
+        }
+
+        function moveCoord(start, bearing, dist) {
+            const R = 6371e3;
+            const δ = dist / R;
+            const θ = bearing * Math.PI/180;
+            const φ1 = start.lat * Math.PI/180;
+            const λ1 = start.lon * Math.PI/180;
+            const φ2 = Math.asin(Math.sin(φ1)*Math.cos(δ) + Math.cos(φ1)*Math.sin(δ)*Math.cos(θ));
+            const λ2 = λ1 + Math.atan2(Math.sin(θ)*Math.sin(δ)*Math.cos(φ1), Math.cos(δ)-Math.sin(φ1)*Math.sin(φ2));
+            return { lat: φ2 * 180/Math.PI, lon: λ2 * 180/Math.PI };
+        }
+
+        function latlonToXY(pos) {
+            if (!originPos) return { x: 0, y: 0 };
+            const d = getDist(originPos, pos);
+            const b = getBearing(originPos, pos);
+            const rad = (b - 90) * Math.PI / 180; 
+            const radB = (b - 90) * Math.PI / 180;
+            return {
+                x: d * Math.cos(radB),
+                y: d * Math.sin(radB)
+            };
+        }
+
+        const DIRS = { 'up': 0, 'right': 90, 'down': 180, 'left': 270 };
+
+        // --- App Logic ---
+        const cvs = document.getElementById('mapCanvas');
+        const ctx = cvs.getContext('2d');
+        const resize = () => { cvs.width = cvs.parentElement.clientWidth; cvs.height = cvs.parentElement.clientHeight; };
+        window.addEventListener('resize', resize); resize();
+
+        // GPS Handler
+        navigator.geolocation.watchPosition(
+            pos => {
+                const { latitude, longitude, accuracy } = pos.coords;
+                myPos = { lat: latitude, lon: longitude };
+                
+                if (!originPos) originPos = { ...myPos }; 
+                
+                if (pathHistory.length === 0 || getDist(pathHistory[pathHistory.length-1], myPos) > 2.0) {
+                    pathHistory.push({ ...myPos });
+                }
+
+                document.getElementById('gps-lat').innerText = `Lat: ${latitude.toFixed(5)}`;
+                document.getElementById('gps-lon').innerText = `Lon: ${longitude.toFixed(5)}`;
+                document.getElementById('gps-acc').innerText = `Acc: ±${accuracy.toFixed(1)}m`;
+                
+                document.getElementById('btn-start').classList.remove('hidden');
+                document.getElementById('status').innerText = "GPS 수신 중";
+
+                if (targetPos && algoState !== "IDLE" && algoState !== "FINISHED") {
+                    const d = getDist(myPos, targetPos);
+                    document.getElementById('target-dist').innerText = d.toFixed(1) + "m";
+                    if (d < PARAMS.ARRIVAL_DIST) {
+                        document.getElementById('input-area').classList.remove('hidden');
+                        document.getElementById('msg').innerText = "도착! RSSI 입력";
+                        if(navigator.vibrate) navigator.vibrate(200);
+                    }
+                }
+                draw();
+            },
+            err => alert("GPS Error: " + err.message),
+            { enableHighAccuracy: true, maximumAge: 0 }
+        );
+
+        window.addEventListener('deviceorientation', e => {
+            if(e.webkitCompassHeading) phoneHeading = e.webkitCompassHeading;
+            else if(e.alpha) phoneHeading = (360 - e.alpha) % 360;
+            document.getElementById('heading').innerText = phoneHeading.toFixed(0) + "°";
+            draw();
+        });
+
+        // Draw Map
+        function draw() {
+            if (!myPos) return;
+            ctx.clearRect(0, 0, cvs.width, cvs.height);
+            
+            const cx = cvs.width / 2;
+            const cy = cvs.height / 2;
+
+            if (isTracking) {
+                const myXY = latlonToXY(myPos);
+                cam.x = myXY.x;
+                cam.y = myXY.y;
+            }
+
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.scale(cam.zoom, cam.zoom);
+            ctx.translate(-cam.x, -cam.y);
+
+            // Grid
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 1 / cam.zoom;
+            const gridSize = 10;
+            const left = cam.x - (cx / cam.zoom);
+            const right = cam.x + (cx / cam.zoom);
+            const top = cam.y - (cy / cam.zoom);
+            const bottom = cam.y + (cy / cam.zoom);
+            
+            ctx.beginPath();
+            for (let x = Math.floor(left/gridSize)*gridSize; x < right; x += gridSize) {
+                ctx.moveTo(x, top); ctx.lineTo(x, bottom);
+            }
+            for (let y = Math.floor(top/gridSize)*gridSize; y < bottom; y += gridSize) {
+                ctx.moveTo(left, y); ctx.lineTo(right, y);
+            }
+            ctx.stroke();
+
+            // Path
+            if (pathHistory.length > 0) {
+                ctx.strokeStyle = '#888';
+                ctx.lineWidth = 2 / cam.zoom;
+                ctx.beginPath();
+                const start = latlonToXY(pathHistory[0]);
+                ctx.moveTo(start.x, start.y);
+                for (let i = 1; i < pathHistory.length; i++) {
+                    const p = latlonToXY(pathHistory[i]);
+                    ctx.lineTo(p.x, p.y);
+                }
+                ctx.stroke();
+            }
+
+            // Visited Waypoints (Start & Numbers)
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            
+            visitedWaypoints.forEach((pos, idx) => {
+                const p = latlonToXY(pos);
+                if (idx === 0) {
+                    ctx.fillStyle = '#FFD700'; 
+                    ctx.font = `${24/cam.zoom}px Arial`;
+                    ctx.fillText('★', p.x, p.y);
+                } else if (idx === visitedWaypoints.length - 1 && algoState === "FINISHED") {
+                    ctx.fillStyle = '#3B82F6'; 
+                    ctx.font = `${24/cam.zoom}px Arial`;
+                    ctx.fillText('★', p.x, p.y);
+                } else {
+                    ctx.beginPath();
+                    ctx.fillStyle = '#777';
+                    ctx.arc(p.x, p.y, 8/cam.zoom, 0, Math.PI*2);
+                    ctx.fill();
+                    ctx.fillStyle = '#FFF';
+                    ctx.font = `${10/cam.zoom}px Arial`;
+                    ctx.fillText(idx, p.x, p.y); 
+                }
+            });
+
+            // Current Target
+            if (targetPos && algoState !== "FINISHED") {
+                const t = latlonToXY(targetPos);
+                ctx.fillStyle = 'red';
+                ctx.beginPath(); ctx.arc(t.x, t.y, 6 / cam.zoom, 0, Math.PI*2); ctx.fill();
+                ctx.strokeStyle = 'red';
+                ctx.lineWidth = 1 / cam.zoom;
+                ctx.beginPath(); ctx.arc(t.x, t.y, PARAMS.ARRIVAL_DIST, 0, Math.PI*2); ctx.stroke();
+
+                const targetB = getBearing(myPos, targetPos);
+                document.getElementById('bearing').innerText = targetB.toFixed(0) + "°";
+                const arrowDeg = targetB - phoneHeading;
+                document.getElementById('arrow').style.transform = `translate(-50%, -100%) rotate(${arrowDeg}deg)`;
+            }
+
+            // Me
+            const m = latlonToXY(myPos);
+            ctx.fillStyle = '#10B981';
+            ctx.beginPath(); ctx.arc(m.x, m.y, 8 / cam.zoom, 0, Math.PI*2); ctx.fill();
+
+            ctx.restore();
+        }
+
+        // --- Touch Controls ---
+        let touchStart = { x: 0, y: 0, dist: 0 };
+        let camStart = { x: 0, y: 0, zoom: 1 };
+
+        cvs.addEventListener('touchstart', e => {
+            if (e.touches.length === 1) {
+                isTracking = false; 
+                touchStart.x = e.touches[0].clientX;
+                touchStart.y = e.touches[0].clientY;
+                camStart.x = cam.x;
+                camStart.y = cam.y;
+            } else if (e.touches.length === 2) {
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                touchStart.dist = Math.sqrt(dx*dx + dy*dy);
+                camStart.zoom = cam.zoom;
+            }
+        }, { passive: false });
+
+        cvs.addEventListener('touchmove', e => {
+            e.preventDefault();
+            if (e.touches.length === 1) {
+                const dx = (e.touches[0].clientX - touchStart.x) / cam.zoom;
+                const dy = (e.touches[0].clientY - touchStart.y) / cam.zoom;
+                cam.x = camStart.x - dx;
+                cam.y = camStart.y - dy;
+                draw();
+            } else if (e.touches.length === 2) {
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                if (touchStart.dist > 0) {
+                    cam.zoom = Math.max(0.5, Math.min(10, camStart.zoom * (dist / touchStart.dist)));
+                }
+                draw();
+            }
+        }, { passive: false });
+
+        document.getElementById('btn-center').onclick = () => {
+            isTracking = true;
+            cam.zoom = 2.0;
+            draw();
+        };
+
+        // --- Algorithm (Ver3 + Wide Scan) ---
+        const processAlgo = (rssi) => {
+            if (algoState === "INIT" && visitedWaypoints.length === 0) {
+                visitedWaypoints.push({ ...myPos, type: 'START' });
+            } else {
+                visitedWaypoints.push({ ...myPos, rssi: rssi });
+            }
+
+            logData.push({
+                time: new Date().toISOString(),
+                state: algoState,
+                rssi: rssi,
+                myPos: { ...myPos },
+                targetPos: targetPos ? { ...targetPos } : null,
+                distToTarget: targetPos ? getDist(myPos, targetPos).toFixed(1) : 0,
+                prevBest: prevBestRssi
+            });
+            document.getElementById('btn-log').innerText = `로그 저장 (${logData.length})`;
+
+            if (rssi >= PARAMS.TARGET_RSSI) {
+                alert("탐색 성공! (-55dBm 도달)");
+                algoState = "FINISHED";
+                draw();
+                return;
+            }
+
+            // 1. INIT (Wide Scan Start)
+            if (algoState === "IDLE" || algoState === "INIT") {
+                if (rssi < PARAMS.DEAD_ZONE) { alert("신호 너무 약함 (-80dBm 이하)"); return; }
+                
+                centerPos = { ...myPos };
+                prevBestRssi = rssi;
+                scanRssi = {};
+                
+                // [Wide Scan Radius]
+                let r = PARAMS.SCAN.FAR;
+                if(rssi > -65) r = PARAMS.SCAN.NEAR;
+                else if(rssi > -75) r = PARAMS.SCAN.MID;
+
+                const order = ['up', 'right', 'down', 'left'];
+                scanQueue = order.filter(d => d !== skipDir && d !== failDir);
+                
+                if(failDir) scanRssi[failDir] = failRssi;
+                failDir = null;
+
+                if(scanQueue.length > 0) {
+                    const nextDir = scanQueue[0];
+                    targetPos = moveCoord(centerPos, DIRS[nextDir], r);
+                    algoState = "SCANNING";
+                } else decide();
+            }
+            
+            // 2. SCANNING
+            else if (algoState === "SCANNING") {
+                const done = scanQueue.shift();
+                if(done) scanRssi[done] = rssi;
+                
+                if (scanQueue.length > 0) {
+                    const next = scanQueue[0];
+                    let r = PARAMS.SCAN.FAR; 
+                    if(prevBestRssi > -65) r = PARAMS.SCAN.NEAR;
+                    else if(prevBestRssi > -75) r = PARAMS.SCAN.MID;
+
+                    targetPos = moveCoord(centerPos, DIRS[next], r);
+                } else {
+                    decide();
+                }
+            }
+
+            // 3. MOVING (Greedy with Standard Step)
+            else if (algoState === "MOVING") {
+                if (rssi >= prevBestRssi - 1.0) {
+                    prevBestRssi = rssi;
+                    centerPos = { ...myPos }; 
+                    
+                    let step = PARAMS.STEP.FAR;
+                    if(rssi > -65) step = PARAMS.STEP.NEAR;
+                    else if(rssi > -75) step = PARAMS.STEP.MID;
+
+                    // [FIX] Greedy Step increased to 1.5x
+                    targetPos = moveCoord(centerPos, DIRS[lastDirName], step * 1.5);
+                } else {
+                    failRssi = rssi;
+                    failDir = lastDirName;
+                    targetPos = { ...centerPos }; 
+                    algoState = "BACKTRACK";
+                }
+            }
+
+            // 4. BACKTRACK
+            else if (algoState === "BACKTRACK") {
+                algoState = "INIT";
+                skipDir = null; 
+                processAlgo(rssi); 
+            }
+
+            document.getElementById('algo-state').innerText = algoState;
+            draw();
+        };
+
+        function decide() {
+            let bestDir = null, max = -999;
+            for(let d in scanRssi) {
+                if(scanRssi[d] > PARAMS.DEAD_ZONE && scanRssi[d] > max) {
+                    max = scanRssi[d]; bestDir = d;
+                }
+            }
+            
+            if (!bestDir) { alert("모든 방향 신호 없음. 이동 불가."); return; }
+
+            let step = PARAMS.STEP.FAR;
+            if(max > -65) step = PARAMS.STEP.NEAR;
+            else if(max > -75) step = PARAMS.STEP.MID;
+
+            targetPos = moveCoord(centerPos, DIRS[bestDir], step);
+            lastDirName = bestDir;
+            
+            if(bestDir=='up') skipDir='down';
+            if(bestDir=='down') skipDir='up';
+            if(bestDir=='left') skipDir='right';
+            if(bestDir=='right') skipDir='left';
+
+            algoState = "MOVING";
+        }
+
+        // --- Inputs ---
+        document.getElementById('btn-start').onclick = () => {
+            if(!myPos) return;
+            document.getElementById('btn-start').classList.add('hidden');
+            document.getElementById('input-area').classList.remove('hidden');
+            document.getElementById('btn-log').classList.remove('hidden'); 
+            document.getElementById('msg').innerText = "시작점 RSSI 입력";
+            
+            if (typeof DeviceOrientationEvent?.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission();
+            }
+        };
+
+        document.getElementById('btn-submit').onclick = () => {
+            const val = parseFloat(document.getElementById('rssi-in').value);
+            if(!val) return;
+            document.getElementById('input-area').classList.add('hidden');
+            document.getElementById('rssi-in').value = '';
+            
+            if(algoState === "IDLE") algoState = "INIT";
+            processAlgo(val);
+        };
+
+        document.getElementById('btn-log').onclick = () => {
+            const blob = new Blob([JSON.stringify(logData, null, 2)], {type:'application/json'});
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'walk_test_log.json';
+            a.click();
+        };
+    </script>
+</body>
+</html>
