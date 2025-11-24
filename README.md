@@ -31,19 +31,25 @@ WIFI-SAR/
 │
 ├── Drone/                                  # 드론 제어 (GPS 기반)
 │   ├── README.md                           하드웨어 설정 가이드
-│   ├── simple.py / simple.cpp             기본 드론 제어
-│   ├── simple_move.py / simple_move.cpp   이동 제어
-│   ├── simple_search.py / simple_search.cpp  탐색 제어
-│   ├── rssi_monitor.py                    RSSI 모니터링
-│   └── CMakeLists.txt                     C++ 빌드 설정
+│   ├── cpp/                               C++ 구현
+│   │   ├── simple.cpp                     기본 드론 제어
+│   │   ├── simple_move.cpp                이동 제어
+│   │   ├── simple_search.cpp              탐색 제어
+│   │   └── CMakeLists.txt                 C++ 빌드 설정
+│   └── python/                            Python 구현
+│       ├── simple.py                      기본 드론 제어
+│       ├── simple_move.py                 이동 제어
+│       ├── simple_search.py               탐색 제어
+│       └── rssi_monitor.py                RSSI 모니터링
 │
 ├── Drone_NoGPS/                            # 드론 제어 (GPS 미사용)
 │   ├── simple_noGPS.py                    기본 제어 (No GPS)
 │   ├── simple_move_noGPS.py               이동 제어 (No GPS)
 │   └── simple_search_noGPS.py             탐색 제어 (No GPS)
 │
-├── GPS Simulator/                          # 도보 시뮬레이터
-│   └── index.html                          # 4방향 전수 조사
+├── GPS_Simulator/                          # 도보 시뮬레이터
+│   ├── README.md                          시뮬레이터 사용 가이드
+│   └── index.html                         4방향 전수 조사
 │
 └── RSSI/                                   # RSSI 신호 처리
     ├── rssi_watch.py                      기본 RSSI 모니터링
