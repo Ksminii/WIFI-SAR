@@ -42,6 +42,9 @@ WIFI-SAR/
 │   ├── simple_move_noGPS.py               이동 제어 (No GPS)
 │   └── simple_search_noGPS.py             탐색 제어 (No GPS)
 │
+├── GPS Simulator/                          # 도보 시뮬레이터
+│   └── index.html                          # 4방향 전수 조사
+│
 └── RSSI/                                   # RSSI 신호 처리
     ├── rssi_watch.py                      기본 RSSI 모니터링
     ├── rssi_watch_EMA.py                  EMA 필터 적용
