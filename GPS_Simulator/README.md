@@ -9,9 +9,6 @@
 ```bash
 # 로컬 서버 실행 (Python)
 python -m http.server 8080
-
-# 또는 Node.js
-npx serve -p 8080
 ```
 
 브라우저에서 `http://localhost:8080/index.html` 접속
