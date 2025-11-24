@@ -18,8 +18,8 @@ except ImportError:
 # [사용자 설정 파라미터]
 # ==========================================
 # 모델 경로
-MODEL_SARD_PATH = 'Object_detection/yolo_sard_finetuning.engine'  # SARD
-MODEL_VIS_PATH  = 'Object_detection/visdrone.engine'              # VisDrone
+MODEL_SARD_PATH = 'Object_detection/yolo_sard_finetuning.pt'  # SARD
+MODEL_VIS_PATH  = 'Object_detection/visdrone.pt'              # VisDrone
 
 DEFAULT_VIDEO_PATH = "test1.mp4"
 
@@ -248,4 +248,5 @@ if __name__ == '__main__':
         multiprocessing.freeze_support()
     except: pass
     
+
     main()
