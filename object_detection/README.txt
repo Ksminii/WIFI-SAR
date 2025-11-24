@@ -64,7 +64,8 @@ results = model.train(
 
 
 Model Selection and Optimization
-실시간 처리 속도와 정확도의 균형을 위해 YOLOv8 Medium 모델로 설정 NVIDIA TensorRT(.engine)로 변환하여 RTX 4070 Super 기준 60 FPS 이상의 실시간 성능 확보. NVIDIA 그래픽 카드를 사용하지 않는 경우 기존 PyTorch 모델(.pt) 사용 가능
+실시간 처리 속도와 정확도의 균형을 위해 YOLOv8 Medium 모델로 설정 NVIDIA TensorRT(.engine)로 변환하여 RTX 4070 Super 기준 60 FPS 이상의 실시간 성능 확보하여 사용, .pt 파일을 .engine파일로 변환하여 사용하는 것 추천
+NVIDIA 그래픽 카드를 사용하지 않는 경우 기존 PyTorch 모델(.pt) 사용 가능
 하드웨어 사양이 부족한 경우 더 가벼운 모델인 YOLOv8s를 기반으로 훈련한 모델을 사용하거나(small_model 폴더), 프레임 처리 단위를 조절하는 프레임 스킵 기능을 사용할 수 있음
 
 Video Input System
