@@ -8,7 +8,7 @@ from datetime import datetime
 from ultralytics import YOLO
 from ensemble_boxes import weighted_boxes_fusion
 
-# 윈도우 알림음 사용을 위한 라이브러리
+# 윈도우 알림음 사용
 try:
     import winsound
 except ImportError:
@@ -17,11 +17,11 @@ except ImportError:
 # ==========================================
 # [사용자 설정 파라미터]
 # ==========================================
-# 모델 경로
-MODEL_SARD_PATH = 'Object_detection/yolo_sard_finetuning.pt'  # SARD
-MODEL_VIS_PATH  = 'Object_detection/visdrone.pt'              # VisDrone
+# 모델 경로(사용자 환경에 맞게 수정할 것)
+MODEL_SARD_PATH = 'yolo_sard_finetuning.pt'  # SARD
+MODEL_VIS_PATH  = 'visdrone.pt'              # VisDrone
 
-DEFAULT_VIDEO_PATH = "test1.mp4"
+DEFAULT_VIDEO_PATH = "test.mp4"
 
 # 앙상블 설정
 CONF_SARD = 0.15     # SARD Confidence
@@ -120,12 +120,13 @@ def process_video(source, is_live=False, skip_frames=0):
     # 비디오 소스 열기
     cap = cv2.VideoCapture(source)
     if not cap.isOpened():
-        print(f"❌ Failed to open video source: {source}")
+        print(f"Failed to open video source: {source}")
         return
 
     if is_live:
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
 
     # 비디오 정보 가져오기
     width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -140,23 +141,21 @@ def process_video(source, is_live=False, skip_frames=0):
     print("Press 'q' in the video window to quit.")
 
     frame_idx = 0
-    prev_time = 0
+    prev_time = time.time()
     last_detections = []
 
     while cap.isOpened():
         ret, frame = cap.read()
-        if not ret: break
+        
+        # Break loop if video ends
+        if not ret:
+            print("\nEnd of video file.")
+            break
 
         frame_idx += 1
 
-        # [프레임 스킵]
-        # skip_frames=0 이면 매 프레임 실행
-        # skip_frames=2 이면 3프레임마다 1번 실행
         if (frame_idx - 1) % (skip_frames + 1) == 0:
             last_detections = detector.run_ensemble(frame)
-            
-            # [알림]
-            # 탐지된 것 중 가장 높은 점수가 기준을 넘으면 소리 발생
             if last_detections:
                 max_score = max([d[4] for d in last_detections])
                 if max_score >= ALERT_THRESHOLD:
@@ -164,38 +163,39 @@ def process_video(source, is_live=False, skip_frames=0):
                     cv2.rectangle(frame, (0, 0), (width, 30), (0, 0, 255), -1)
                     cv2.putText(frame, f"ALERT! FOUND ({max_score:.2f})", (10, 20),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            current_to_draw = last_detections
+        else:
+            current_to_draw = last_detections
 
-        # 시각화
-        for det in last_detections:
-            x1, y1, x2, y2, score = det
-            
-            # 알림 기준 넘는 건 빨간색, 아니면 초록색으로 표기
-            color = (0, 0, 255) if score >= ALERT_THRESHOLD else (0, 255, 0)
-            
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(frame, f"Human {score:.2f}", (x1, y1-10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+        if current_to_draw:
+            for det in current_to_draw:
+                x1, y1, x2, y2, score = det
+                color = (0, 0, 255) if score >= ALERT_THRESHOLD else (0, 255, 0)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                cv2.putText(frame, f"Human {score:.2f}", (x1, y1-10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-        # 상태 표시
         curr_time = time.time()
-        curr_fps = 1 / (curr_time - prev_time) if prev_time > 0 else 0
+        diff = curr_time - prev_time
+        if diff == 0: diff = 0.001
+        curr_fps = 1 / diff
         prev_time = curr_time
 
-        status_text = f"Live FPS: {curr_fps:.1f} | Skip: {skip_frames}"
-        cv2.putText(frame, status_text, (10, height - 20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+        status_text = f"FPS: {curr_fps:.1f} | Skip: {skip_frames}"
+        cv2.putText(frame, status_text, (10, height - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
 
-        # 결과 저장 및 출력
         out.write(frame)
         cv2.imshow('SAR Operation System', frame)
 
         if cv2.waitKey(1) == ord('q'):
+            print("\nStopped by user.")
             break
 
     cap.release()
     out.release()
     cv2.destroyAllWindows()
-    print("\nfinish.")
+    cv2.waitKey(1) # For Mac window close bug
+    print("\nJob Completed.")
 
 def main():
     print("="*40)
@@ -228,7 +228,7 @@ def main():
         if os.path.exists(path):
             process_video(path, is_live=False, skip_frames=skip_frames)
         else:
-            print(f"❌ File not found: {path}")
+            print(f"File not found: {path}")
 
     elif choice == '2':
         print("\n[Connect Live Camera Source]")
