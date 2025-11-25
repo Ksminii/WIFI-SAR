@@ -141,6 +141,31 @@ pip install ultralytics ensemble-boxes opencv-python
 python detection.py
 ```
 
+## (Macbook / vscode) 가상환경
+
+```bash
+#'sar_env'라는 이름으로 가상환경 생성 (Python 3.10 권장)
+conda create -n sar_env python=3.10 -y
+
+conda activate sar_env
+
+pip install "numpy<2.0"
+
+pip install ultralytics ensemble-boxes opencv-python
+
+# 실행하려는 폴더로 이동
+cd ~/Desktop/github/WIFI-SAR/object_detection/
+
+# 파이썬 실행
+python detection.py
+```
+
+## TIP
+
+실시간 처리가 필요한 환경은 보통 laptop을 사용하는데, 사양이 충분하다면 frame skip을 하지 않아도 괜찮지만
+테스트한 결과, frame skip을 하여도(skip select = 2) 충분히 실시간으로 detection 성능을 보여줌
+local video file Analysis를 하는 경우에는 속도보단 정확도가 중요하므로 frame을 skip하지 않고 사용하는 것을 추천
+
 ## License
 
 This project uses datasets and models based on:
