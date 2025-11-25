@@ -166,6 +166,13 @@ python detection.py
 테스트한 결과, frame skip을 하여도(skip select = 2) 충분히 실시간으로 detection 성능을 보여줌
 local video file Analysis를 하는 경우에는 속도보단 정확도가 중요하므로 frame을 skip하지 않고 사용하는 것을 추천
 
+## samll_model
+
+yolov8s로 훈련하여, yolov8m으로 훈련한 모델보다 가벼움
+macbook pro m4 기준 frame skip 없이 사용해도 충분히 실시간을 반영할 수 있는 속도 가능
+yolov8m으로 훈련한 모델도 동일 조건 기준 frame skip 시 실시간으로 작동하므로, 최대한 yolov8m을 사용하되
+그래픽카드가 없고 사양이 낮아 yolov8m 모델을 사용할때 거의 실행 불가능한 경우 이 모델을 사용
+
 ## License
 
 This project uses datasets and models based on:
