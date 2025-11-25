@@ -153,9 +153,14 @@ def process_video(source, is_live=False, skip_frames=0):
             break
 
         frame_idx += 1
-
+        
+        # [프레임 스킵]
+        # skip_frames=0 이면 매 프레임 실행
+        # skip_frames=2 이면 3프레임마다 1번 실행
         if (frame_idx - 1) % (skip_frames + 1) == 0:
             last_detections = detector.run_ensemble(frame)
+            # [알림]
+            # 탐지된 것 중 가장 높은 점수가 기준을 넘으면 소리 발생
             if last_detections:
                 max_score = max([d[4] for d in last_detections])
                 if max_score >= ALERT_THRESHOLD:
@@ -184,6 +189,7 @@ def process_video(source, is_live=False, skip_frames=0):
         status_text = f"FPS: {curr_fps:.1f} | Skip: {skip_frames}"
         cv2.putText(frame, status_text, (10, height - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
 
+        # 결과 저장 및 출력
         out.write(frame)
         cv2.imshow('SAR Operation System', frame)
 
