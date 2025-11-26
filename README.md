@@ -53,9 +53,13 @@ WIFI-SAR/
 │   └── index.html                         4방향 전수 조사
 │
 ├── object_detection/                       # 객체 탐지 (YOLOv8)
-│   ├── README.txt                         상세 설명
+│   ├── README.md                          상세 설명
 │   ├── detection.py                       객체 탐지 스크립트
+│   ├── visdrone.pt                        VisDrone 학습 모델
+│   ├── yolo_sard_finetuning.pt            SARD Fine-tuned 모델
 │   └── small_model/                       경량화 모델
+│       ├── visdrone.pt                    VisDrone 경량화 모델
+│       └── yolo_sard_finetuning.pt        SARD 경량화 모델
 │                 
 └── RSSI/                                   # RSSI 신호 처리
     ├── README.md                          상세 설명
