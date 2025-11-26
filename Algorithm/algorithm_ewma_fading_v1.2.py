@@ -362,7 +362,7 @@ class SimulationRunner:
         """
         
         # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-        # --- [추가] 3-시그마 기반의 동적 성공 임계값 계산 
+        # --- 3-시그마 기반의 동적 성공 임계값 계산 
         # 1. 10m 지점의 이론적 RSSI 계산할 것, 핫스팟 기준이라 TX 파워를 15로 가정했음
         # 공식: 15.0 - (30 + 20 * log10(10)) = -35.0
         theoretical_rssi_at_10m = -35.0
@@ -379,7 +379,7 @@ class SimulationRunner:
         # 3. 3-시그마 값을 더해 최종 성공 임계값(상한선)을 계산
         success_threshold_dbm = theoretical_rssi_at_10m + (3 * current_std) + positive_fading_margin
 
-        # 시각화 모드일 때 계산된 임계값 출력 (확인용)
+        # 시각화 모드일 때 계산된 임계값 출력
         if visualizer:
             print(f"\nSimulation with RSSI_SHADOW_STD = {current_std:.1f}")
             print(f"Success Threshold set to: {success_threshold_dbm:.2f} dBm")
@@ -428,7 +428,7 @@ class SimulationRunner:
             if visualizer:
                 visualizer.update(env, algo, reported_pos, simulation_time, current_rssi)
             
-            # --- [수정] 성공 판정 로직을 다시 거리 기반으로 변경 ---
+            # --- 성공 판정 로직을 다시 거리 기반으로 변경 ---
             if not algo.is_finished and current_rssi >= success_threshold_dbm:
                 algo.is_finished = True
                 algo.state = "FINISHED_SUCCESS"
@@ -448,7 +448,6 @@ class SimulationRunner:
             reason=reason,
             waypoint_count=algo.waypoint_count,
             waypoints_at_threshold=waypoints_at_threshold_pass,
-            # --- [수정] 결과에 성공 시점 RSSI 포함 ---
             rssi_at_success=rssi_at_success
         )
 

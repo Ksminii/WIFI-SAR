@@ -86,7 +86,7 @@ class SimResult:
     waypoint_count: int
     waypoints_at_threshold: int
     rssi_at_success: float
-    true_total_travel: float  # [추가] True Pos 기반 실제 이동 거리
+    true_total_travel: float  # True Pos 기반 실제 이동 거리
 
 
 # --------------------------------------------------------------------------
@@ -536,7 +536,7 @@ class SimulationRunner:
                                                  ratio * (threshold_map[keys[i + 1]] - threshold_map[keys[i]]))
                         break
 
-        # 시각화 모드일 때 계산된 임계값 출력 (확인용)
+        # 시각화 모드일 때 계산된 임계값 출력
         if visualizer:
             print(f"\nSimulation with RSSI_SHADOW_STD = {current_std:.1f}")
             # Rician/Rayleigh 상태 표시 추가
