@@ -13,9 +13,20 @@
 | Model A | YOLOv8m | VisDrone (Human subset) | 상공의 소형 객체 탐지 특화. 배경 노이즈 오탐 가능성 존재 |
 | Model B | YOLOv8m | SARD (SAR Dataset) | 숲속이나 야외 환경의 실종자 탐지 특화 |
 
+### Training Methodology 
+데이터셋의 크기와 도메인 특성에 맞춰 차별화된 전이 학습 전략을 적용
+
+- Model A (VisDrone): Full Fine-tuning
+    - 이유: 데이터셋의 크기가 크고, 지상 뷰(COCO)와 드론 뷰(VisDrone) 간의 도메인 차이가 큼
+    - 방법: 모델의 모든 레이어 파라미터를 업데이트하여 새로운 도메인에 대한 적응력을 극대화
+
+- Model B (SARD): Backbone Freezing (Partial Fine-tuning)
+    - 이유: 데이터셋의 크기가 상대적으로 작아 과적합 위험이 있으며, 탐지 대상의 특징이 사전 학습된 모델의 지식과 유사함.
+    - 방법: Backbone를 Freeze하여 기존의 강력한 시각적 특징 추출 능력을 보존하고, Classifier 부분만 집중적으로 재학습하여 효율성을 높임.
+
 ## Model Details
 
-### 1. Model A: VisDrone Trained
+### 1. Model A : VisDrone Trained
 
 드론 항공 촬영 데이터셋인 VisDrone에서 사람(Pedestrian, People) 클래스만 추출하여 학습
 
@@ -31,7 +42,7 @@
 - Performance: 상공에서의 작은 객체 탐지
 - Limitation: 바위나 나무 등을 사람으로 오인하는 오탐(FP)이 존재
 
-### 2. Model B: SARD Fine-tuned
+### 2. Model B : SARD Fine-tuned
 
 실종자 수색 전용 데이터셋(SARD)을 사용하여, 숲속이나 야외 환경의 실종자 탐지 특화하여 학습한 모델
 
@@ -71,7 +82,7 @@ results = model.train(
 
 실시간 처리 속도와 정확도의 균형을 위해 YOLOv8 Medium 모델로 설정
 
-- TensorRT 최적화: NVIDIA TensorRT(.engine)로 변환하여 RTX 4070 Super 기준 60 FPS 이상의 실시간 성능 확보. `.pt` 파일을 `.engine` 파일로 변환하여 사용하는 것 추천
+- TensorRT 최적화: NVIDIA TensorRT(.engine)로 변환하여 RTX 4070 Super 기준 60 FPS 이상의 실시간 성능 확인. `.pt` 파일을 `.engine` 파일로 변환하여 사용하는 것 추천
 - NVIDIA 미사용 시: 기존 PyTorch 모델(.pt) 사용 가능
 - 저사양 PC 대응:
   - 더 가벼운 모델인 YOLOv8s를 기반으로 훈련한 모델 사용 (`small_model` 폴더)
@@ -110,11 +121,11 @@ VisDrone 모델의 배경 오탐 문제를 해결하기 위해 크기 기반 필
 - Real-time Stream: OBS 가상 카메라 및 HDMI 캡쳐보드를 통한 실시간 드론 영상 분석
 
 ### 2. Real-time Alert System
-- 설정된 신뢰도 이상의 객체 발견 시 경고음 출력 및 화면 알림 (현재는 미사용으로 체크)
+- 설정된 신뢰도 이상의 객체 발견 시 경고음 출력 및 화면 알림 (현재는 1.0으로 설정)
 
 ### 3. Performance Optimization
-- TensorRT 가속 적용
 - Frame Skipping 옵션 제공 (배터리 절약(laptop) / 저사양 PC 대응)
+- lightweight Option 제공('yolov8s' 기반의 경량 모델(small_model) 지원)
 
 ## Environment and Requirements
 
@@ -141,16 +152,13 @@ pip install ultralytics ensemble-boxes opencv-python
 python detection.py
 ```
 
-## (Macbook / vscode) 가상환경
+## (Macbook / vscode) setup
 
 ```bash
 #'sar_env'라는 이름으로 가상환경 생성 (Python 3.10 권장)
 conda create -n sar_env python=3.10 -y
-
 conda activate sar_env
-
 pip install "numpy<2.0"
-
 pip install ultralytics ensemble-boxes opencv-python
 
 # 실행하려는 폴더로 이동
