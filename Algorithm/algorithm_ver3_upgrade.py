@@ -251,7 +251,6 @@ class HomingAlgorithm:
                 self.current_step = self.params.STEP_NEAR
                 self.current_radius = self.params.SCAN_RADIUS_NEAR
 
-            # [수정됨] 큐 생성 로직
             full_order = ['right', 'left', 'up', 'down']
             self.scan_queue = []
 
@@ -346,8 +345,7 @@ class HomingAlgorithm:
         # [4] 복귀 중 (Backtracking)
         elif self.state == "RETURNING_TO_BEST":
             if arrived:
-                # 안전하게 베이스캠프 복귀 완료
-                # 이제 여기서부터 다시 정석대로 4방향 탐색 시작
+                # 여기서부터 다시 정석대로 4방향 탐색 시작
                 self.state = "INIT"
                 self.skip_dir = None
 
@@ -552,7 +550,7 @@ class SimulationRunner:
 
             # waypoint 계산 중 상태 표시
             if visualizer:
-                # [수정] reported_pos를 visualizer에 전달
+                # reported_pos를 visualizer에 전달
                 visualizer.update(env, true_pos, reported_pos, simulation_time, current_rssi,
                                   status="Computing Waypoint",
                                   algo_state=current_algo_state_str, next_waypoint=algo.waypoint)
